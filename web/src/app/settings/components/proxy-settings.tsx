@@ -147,7 +147,7 @@ export function ProxySettingsCard() {
               <Input
                 value={formUrl}
                 onChange={(event) => setFormUrl(event.target.value)}
-                placeholder="http://user:pass@host:port 或 socks5://host:port"
+                placeholder="http://user:pass@host:port 或 socks5h://host:port"
                 className="h-11 rounded-xl border-stone-200 bg-white font-mono text-xs"
               />
               <div className="text-xs text-stone-400">

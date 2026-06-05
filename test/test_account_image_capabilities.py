@@ -97,6 +97,30 @@ class AccountCapabilityTests(unittest.TestCase):
             self.assertEqual(plus_token, "token-plus")
             self.assertEqual(pro_token, "token-pro")
 
+    def test_get_available_access_token_skips_excluded_tokens(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            service = AccountService(JSONStorageBackend(Path(tmp_dir) / "accounts.json"))
+            service.add_account_items([
+                {"access_token": "token-one", "type": "Plus", "status": "姝ｅ父", "quota": 3},
+                {"access_token": "token-two", "type": "Plus", "status": "姝ｅ父", "quota": 3},
+            ])
+            service.fetch_remote_info = lambda access_token, event="fetch_remote_info": service.get_account(access_token)
+
+            token = service.get_available_access_token(excluded_tokens={"token-one"})
+            service.release_image_slot(token)
+
+            self.assertEqual(token, "token-two")
+
+    def test_get_available_access_token_fails_when_all_candidates_excluded(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            service = AccountService(JSONStorageBackend(Path(tmp_dir) / "accounts.json"))
+            service.add_account_items([
+                {"access_token": "token-one", "type": "Plus", "status": "姝ｅ父", "quota": 3},
+            ])
+
+            with self.assertRaisesRegex(RuntimeError, "no available image quota"):
+                service.get_available_access_token(excluded_tokens={"token-one"})
+
     def test_refresh_accounts_can_remove_invalid_token_without_confirmation_delay(self) -> None:
         original_value = config.data.get("auto_remove_invalid_accounts")
         config.data["auto_remove_invalid_accounts"] = True

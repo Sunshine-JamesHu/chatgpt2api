@@ -16,6 +16,7 @@ from services.image_storage_service import image_storage_service
 from services.openai_backend_api import ImageContentPolicyError, ImagePollTimeoutError, OpenAIBackendAPI
 from utils.helper import (
     IMAGE_MODELS,
+    UpstreamHTTPError,
     extract_image_from_message_content,
     is_codex_image_model,
     is_supported_image_model,
@@ -103,6 +104,21 @@ def is_connection_timeout_error(message: str) -> bool:
     )
 
 
+def is_recoverable_network_error(message: str) -> bool:
+    text = str(message or "").lower()
+    return (
+        is_tls_connection_error(text)
+        or is_connection_timeout_error(text)
+        or "curl:" in text
+        or "network" in text
+        or "proxy" in text
+        or "failed to connect" in text
+        or "connection refused" in text
+        or "connection reset" in text
+        or "remote disconnected" in text
+    )
+
+
 def image_stream_error_message(message: str) -> str:
     text = str(message or "")
     if is_token_invalid_error(text):
@@ -112,6 +128,27 @@ def image_stream_error_message(message: str) -> str:
     if is_connection_timeout_error(text):
         return "upstream connection timed out, please retry later"
     return text or "image generation failed"
+
+
+def is_recoverable_image_generation_error(exc: ImageGenerationError) -> bool:
+    if exc.error_type == "invalid_request_error" and exc.code not in {"no_image_generated", "upstream_text_reply"}:
+        return False
+    if exc.status_code in {408, 409, 425, 429}:
+        return True
+    if 500 <= int(exc.status_code or 0) < 600:
+        return True
+    text = str(exc)
+    return (
+        is_model_text_reply_instead_of_image(text)
+        or is_tls_connection_error(text)
+        or is_connection_timeout_error(text)
+        or "no image result found" in text.lower()
+        or "upstream completed without generating images" in text.lower()
+    )
+
+
+def is_recoverable_upstream_error(exc: UpstreamHTTPError) -> bool:
+    return exc.status_code in {408, 409, 425, 429} or 500 <= int(exc.status_code or 0) < 600
 
 
 REFERENCED_IMAGE_IDS_RE = re.compile(r'"referenced_image_ids"\s*:\s*\[([^\]]+)\]')
@@ -1222,20 +1259,46 @@ def _generate_single_image(
     该函数在独立线程中运行，每个线程使用不同的账号，
     实现并行生图，避免串行超时阻塞。
     """
-    # 模型返回文本而非图片的最大重试次数
-    MAX_TEXT_REPLY_RETRIES = 3
-    # TLS 连接错误最大重试次数
-    MAX_TLS_RETRIES = 3
-    # 连接超时错误最大重试次数（同账号短等待重试）
-    MAX_CONN_TIMEOUT_RETRIES = 3
-    # 轮询超时错误最大重试次数（换账号重试）
-    MAX_POLL_TIMEOUT_RETRIES = 4
-
-    text_reply_retry_count = 0
-    tls_retry_count = 0
-    conn_timeout_retry_count = 0
-    poll_timeout_retry_count = 0
+    max_account_retries = config.image_max_account_retries
+    account_retry_count = 0
+    attempted_tokens: set[str] = set()
     account_email = ""
+
+    def _retry_with_next_account(reason: str, token: str, error: object, extra: dict[str, object] | None = None) -> bool:
+        nonlocal account_retry_count
+        attempted_tokens.add(token)
+        if account_retry_count >= max_account_retries:
+            payload = {
+                "event": "image_account_retry_exhausted",
+                "reason": reason,
+                "request_token": token,
+                "account_email": account_email,
+                "retry_count": account_retry_count,
+                "max_retries": max_account_retries,
+                "attempted_count": len(attempted_tokens),
+                "index": index,
+                "error": str(error)[:200],
+            }
+            if extra:
+                payload.update(extra)
+            logger.warning(payload)
+            return False
+        account_retry_count += 1
+        payload = {
+            "event": "image_account_retry",
+            "reason": reason,
+            "request_token": token,
+            "account_email": account_email,
+            "retry_count": account_retry_count,
+            "max_retries": max_account_retries,
+            "attempted_count": len(attempted_tokens),
+            "index": index,
+            "error": str(error)[:200],
+        }
+        if extra:
+            payload.update(extra)
+        logger.warning(payload)
+        return True
 
     while True:
         try:
@@ -1247,6 +1310,7 @@ def _generate_single_image(
                 plan_type=plan_type,
                 source_type="codex" if codex_model else None,
                 plan_types=("plus", "team", "pro") if codex_model and not plan_type else None,
+                excluded_tokens=attempted_tokens,
             )
         except RuntimeError as exc:
             raise ImageGenerationError(str(exc) or "image generation failed", account_email=account_email) from exc
@@ -1308,26 +1372,8 @@ def _generate_single_image(
             if account_email:
                 setattr(exc, "account_email", account_email)
             # 轮询超时：换账号重试
-            if not emitted_for_token:
-                poll_timeout_retry_count += 1
-                if poll_timeout_retry_count <= MAX_POLL_TIMEOUT_RETRIES:
-                    logger.warning({
-                        "event": "image_poll_timeout_retry",
-                        "request_token": token,
-                        "account_email": account_email,
-                        "retry_count": poll_timeout_retry_count,
-                        "index": index,
-                        "error": str(exc)[:200],
-                    })
-                    continue
-                logger.warning({
-                    "event": "image_poll_timeout_exhausted_retries",
-                    "request_token": token,
-                    "account_email": account_email,
-                    "retry_count": poll_timeout_retry_count,
-                    "index": index,
-                })
-                raise
+            if _retry_with_next_account("poll_timeout", token, exc):
+                continue
             raise
         except ImageContentPolicyError as exc:
             account_service.mark_image_result(token, False)
@@ -1352,34 +1398,10 @@ def _generate_single_image(
                 exc.account_email = account_email
             error_text = str(exc)
             # 如果是模型返回文本而非图片，尝试换账号重试
-            if is_model_text_reply_instead_of_image(error_text) and not emitted_for_token:
-                text_reply_retry_count += 1
-                if text_reply_retry_count <= MAX_TEXT_REPLY_RETRIES:
-                    logger.warning({
-                        "event": "image_model_text_reply_retry",
-                        "request_token": token,
-                        "account_email": account_email,
-                        "retry_count": text_reply_retry_count,
-                        "index": index,
-                        "error": error_text[:200],
-                    })
+            if is_recoverable_image_generation_error(exc):
+                reason = "text_reply" if is_model_text_reply_instead_of_image(error_text) else "generation_error"
+                if _retry_with_next_account(reason, token, exc, {"status_code": exc.status_code, "code": exc.code or ""}):
                     continue
-                logger.warning({
-                    "event": "image_model_text_reply_exhausted_retries",
-                    "request_token": token,
-                    "account_email": account_email,
-                    "retry_count": text_reply_retry_count,
-                    "index": index,
-                })
-                raise ImageGenerationError(
-                    "Image generation failed: the upstream model returned a text description "
-                    "instead of generating an image. Please try again later.",
-                    status_code=502,
-                    error_type="server_error",
-                    code="upstream_text_reply",
-                    account_email=account_email,
-                    conversation_id=getattr(exc, "conversation_id", ""),
-                ) from exc
             logger.warning({
                 "event": "image_stream_generation_error",
                 "request_token": token,
@@ -1388,6 +1410,12 @@ def _generate_single_image(
                 "index": index,
             })
             raise
+        except UpstreamHTTPError as exc:
+            account_service.mark_image_result(token, False)
+            if is_recoverable_upstream_error(exc):
+                if _retry_with_next_account("upstream_http", token, exc, {"status_code": exc.status_code}):
+                    continue
+            raise ImageGenerationError(image_stream_error_message(str(exc)), account_email=account_email, conversation_id="") from exc
         except Exception as exc:
             account_service.mark_image_result(token, False)
             last_error = str(exc)
@@ -1401,40 +1429,19 @@ def _generate_single_image(
             if not emitted_for_token and is_token_invalid_error(last_error):
                 refreshed_token = account_service.refresh_access_token(token, force=True, event="image_stream")
                 if refreshed_token and refreshed_token != token:
-                    token = refreshed_token
                     continue
                 account_service.remove_invalid_token(token, "image_stream")
                 continue
-            # TLS/SSL 连接错误：自动重试
-            if not emitted_for_token and is_tls_connection_error(last_error):
-                tls_retry_count += 1
-                if tls_retry_count <= MAX_TLS_RETRIES:
-                    logger.warning({
-                        "event": "image_stream_tls_retry",
-                        "request_token": token,
-                        "account_email": account_email,
-                        "retry_count": tls_retry_count,
-                        "index": index,
-                        "error": last_error[:200],
-                    })
-                    time.sleep(min(2.0 * tls_retry_count, 10.0))
+            # TLS/SSL 连接错误：换账号重试
+            if is_tls_connection_error(last_error):
+                if _retry_with_next_account("tls", token, exc):
                     continue
-            # 连接超时错误（curl 28）：同账号短等待重试，不切换账号
-            if not emitted_for_token and is_connection_timeout_error(last_error):
-                conn_timeout_retry_count += 1
-                if conn_timeout_retry_count <= MAX_CONN_TIMEOUT_RETRIES:
-                    wait_secs = min(3.0 * conn_timeout_retry_count, 9.0)
-                    logger.warning({
-                        "event": "image_stream_conn_timeout_retry",
-                        "request_token": token,
-                        "account_email": account_email,
-                        "retry_count": conn_timeout_retry_count,
-                        "index": index,
-                        "wait_secs": wait_secs,
-                        "error": last_error[:200],
-                    })
-                    time.sleep(wait_secs)
+            # 连接超时错误（curl 28）：换账号重试
+            if is_connection_timeout_error(last_error):
+                if _retry_with_next_account("connection_timeout", token, exc):
                     continue
+            if is_recoverable_network_error(last_error) and _retry_with_next_account("network", token, exc):
+                continue
             raise ImageGenerationError(image_stream_error_message(last_error), account_email=account_email, conversation_id="") from exc
 
 

@@ -299,6 +299,13 @@ class ConfigStore:
             return 3
 
     @property
+    def image_max_account_retries(self) -> int:
+        try:
+            return min(20, max(0, int(self.data.get("image_max_account_retries", 3))))
+        except (TypeError, ValueError):
+            return 3
+
+    @property
     def image_parallel_generation(self) -> bool:
         value = self.data.get("image_parallel_generation", True)
         if isinstance(value, str):
@@ -422,6 +429,7 @@ class ConfigStore:
         data["image_poll_interval_secs"] = self.image_poll_interval_secs
         data["image_poll_initial_wait_secs"] = self.image_poll_initial_wait_secs
         data["image_account_concurrency"] = self.image_account_concurrency
+        data["image_max_account_retries"] = self.image_max_account_retries
         data["image_parallel_generation"] = self.image_parallel_generation
         data["auto_remove_invalid_accounts"] = self.auto_remove_invalid_accounts
         data["auto_remove_rate_limited_accounts"] = self.auto_remove_rate_limited_accounts

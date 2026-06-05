@@ -58,6 +58,26 @@ class ConfigLoadingTests(unittest.TestCase):
                 else:
                     module.os.environ["CHATGPT2API_AUTH_KEY"] = old_env_auth_key
 
+    def test_image_max_account_retries_is_normalized(self) -> None:
+        module = self.config_module
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+
+            path.write_text(json.dumps({"auth-key": "test-auth"}), encoding="utf-8")
+            self.assertEqual(module.ConfigStore(path).image_max_account_retries, 3)
+
+            path.write_text(json.dumps({"auth-key": "test-auth", "image_max_account_retries": "bad"}), encoding="utf-8")
+            self.assertEqual(module.ConfigStore(path).image_max_account_retries, 3)
+
+            path.write_text(json.dumps({"auth-key": "test-auth", "image_max_account_retries": 0}), encoding="utf-8")
+            self.assertEqual(module.ConfigStore(path).image_max_account_retries, 0)
+
+            path.write_text(json.dumps({"auth-key": "test-auth", "image_max_account_retries": -1}), encoding="utf-8")
+            self.assertEqual(module.ConfigStore(path).image_max_account_retries, 0)
+
+            path.write_text(json.dumps({"auth-key": "test-auth", "image_max_account_retries": 99}), encoding="utf-8")
+            self.assertEqual(module.ConfigStore(path).image_max_account_retries, 20)
+
 
 if __name__ == "__main__":
     unittest.main()

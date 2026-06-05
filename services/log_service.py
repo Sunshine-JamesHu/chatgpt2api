@@ -20,7 +20,13 @@ from utils.helper import anthropic_sse_stream, sse_json_stream
 
 LOG_TYPE_CALL = "call"
 LOG_TYPE_ACCOUNT = "account"
-INTERNAL_RESPONSE_KEYS = {"_account_email", "_conversation_id"}
+INTERNAL_RESPONSE_KEYS = {
+    "_account_email",
+    "_conversation_id",
+    "_image_retry_count",
+    "_image_attempted_accounts",
+    "_image_retry_reasons",
+}
 
 
 class LogService:
@@ -157,6 +163,45 @@ def _collect_conversation_ids(value: object) -> list[str]:
     return ids
 
 
+def _collect_image_retry_info(value: object) -> dict[str, Any]:
+    info: dict[str, Any] = {}
+
+    def visit(item: object) -> None:
+        if isinstance(item, dict):
+            retry_count = item.get("_image_retry_count")
+            attempted_accounts = item.get("_image_attempted_accounts")
+            retry_reasons = item.get("_image_retry_reasons")
+            if retry_count is not None:
+                try:
+                    info["image_retry_count"] = max(int(info.get("image_retry_count") or 0), int(retry_count))
+                except (TypeError, ValueError):
+                    pass
+            if attempted_accounts is not None:
+                try:
+                    info["image_attempted_accounts"] = max(
+                        int(info.get("image_attempted_accounts") or 0),
+                        int(attempted_accounts),
+                    )
+                except (TypeError, ValueError):
+                    pass
+            if isinstance(retry_reasons, list):
+                existing = list(info.get("image_retry_reasons") or [])
+                for reason in retry_reasons:
+                    reason_text = str(reason or "").strip()
+                    if reason_text and reason_text not in existing:
+                        existing.append(reason_text)
+                if existing:
+                    info["image_retry_reasons"] = existing
+            for child in item.values():
+                visit(child)
+        elif isinstance(item, list):
+            for child in item:
+                visit(child)
+
+    visit(value)
+    return info
+
+
 def _strip_internal_response_fields(value: object) -> object:
     if isinstance(value, dict):
         return {
@@ -230,7 +275,7 @@ class LoggedCall:
         try:
             result = await run_in_threadpool(handler, *args)
         except ImageGenerationError as exc:
-            self.log("调用失败", status="failed", error=str(exc), account_email=getattr(exc, "account_email", ""),
+            self.log("调用失败", result=exc, status="failed", error=str(exc), account_email=getattr(exc, "account_email", ""),
                      conversation_id=getattr(exc, "conversation_id", ""))
             return _image_error_response(exc)
         except HTTPException as exc:
@@ -244,15 +289,14 @@ class LoggedCall:
 
         if isinstance(result, dict):
             self.log("调用完成", result)
-            response = dict(result)
-            response.pop("_account_email", None)
+            response = _strip_internal_response_fields(dict(result))
             return response
 
         sender = anthropic_sse_stream if sse == "anthropic" else sse_json_stream
         try:
             has_first, first = await run_in_threadpool(_next_item, result)
         except ImageGenerationError as exc:
-            self.log("调用失败", status="failed", error=str(exc), account_email=getattr(exc, "account_email", ""),
+            self.log("调用失败", result=exc, status="failed", error=str(exc), account_email=getattr(exc, "account_email", ""),
                      conversation_id=getattr(exc, "conversation_id", ""))
             return _image_error_response(exc)
         except HTTPException as exc:
@@ -272,12 +316,14 @@ class LoggedCall:
         urls: list[str] = []
         account_emails: list[str] = []
         conversation_ids: list[str] = []
+        image_retry_info: dict[str, Any] = {}
         failed = False
         try:
             for item in items:
                 urls.extend(_collect_urls(item))
                 account_emails.extend(_collect_account_emails(item))
                 conversation_ids.extend(_collect_conversation_ids(item))
+                image_retry_info.update(_collect_image_retry_info(item))
                 yield _strip_internal_response_fields(item)
         except Exception as exc:
             failed = True
@@ -288,19 +334,26 @@ class LoggedCall:
                 urls=urls,
                 account_email=(account_emails[0] if account_emails else getattr(exc, "account_email", "")),
                 conversation_id=(conversation_ids[0] if conversation_ids else getattr(exc, "conversation_id", "")),
+                image_retry_info=image_retry_info,
             )
             if self.endpoint.startswith("/v1/images") and not hasattr(exc, "to_openai_error"):
                 from services.protocol.conversation import ImageGenerationError, public_image_error_message
 
-                raise ImageGenerationError(public_image_error_message(str(exc))) from exc
+                raise ImageGenerationError(
+                    public_image_error_message(str(exc)),
+                    retry_count=getattr(exc, "retry_count", 0),
+                    attempted_accounts=getattr(exc, "attempted_accounts", 0),
+                    retry_reasons=getattr(exc, "retry_reasons", []),
+                ) from exc
             raise
         finally:
             if not failed:
                 self.log("流式调用结束", urls=urls, account_email=account_emails[0] if account_emails else "",
-                         conversation_id=conversation_ids[0] if conversation_ids else "")
+                         conversation_id=conversation_ids[0] if conversation_ids else "", image_retry_info=image_retry_info)
 
     def log(self, suffix: str, result: object = None, status: str = "success", error: str = "",
-            urls: list[str] | None = None, account_email: str = "", conversation_id: str = "") -> None:
+            urls: list[str] | None = None, account_email: str = "", conversation_id: str = "",
+            image_retry_info: dict[str, Any] | None = None) -> None:
         detail = {
             "key_id": self.identity.get("id"),
             "key_name": self.identity.get("name"),
@@ -317,6 +370,18 @@ class LoggedCall:
             detail["request_text"] = request_excerpt
         if self.request_shape:
             detail["request_shape"] = self.request_shape
+        retry_info = {**_collect_image_retry_info(result), **(image_retry_info or {})}
+        if not retry_info and self.endpoint.startswith("/v1/images"):
+            retry_count = getattr(result, "retry_count", 0)
+            attempted_accounts = getattr(result, "attempted_accounts", 0)
+            retry_reasons = getattr(result, "retry_reasons", [])
+            if retry_count:
+                retry_info["image_retry_count"] = retry_count
+                retry_info["image_attempted_accounts"] = attempted_accounts or retry_count + 1
+            if retry_reasons:
+                retry_info["image_retry_reasons"] = list(retry_reasons)
+        if retry_info:
+            detail.update(retry_info)
         if error:
             detail["error"] = error
         email = str(account_email or "").strip()

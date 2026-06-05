@@ -5,7 +5,7 @@ from unittest import mock
 
 from services.openai_backend_api import ImageContentPolicyError
 from services.protocol import conversation
-from services.protocol.conversation import ConversationRequest, ImageGenerationError, ImageOutput
+from services.protocol.conversation import ConversationRequest, ImageGenerationError, ImageOutput, collect_image_outputs
 from utils.helper import UpstreamHTTPError
 
 
@@ -38,14 +38,22 @@ class FakeAccountService:
 
 
 class ImageAccountRetryTests(unittest.TestCase):
-    def run_with(self, service: FakeAccountService, side_effects, max_retries: int = 3):
-        request = ConversationRequest(model="gpt-image-2", prompt="draw", response_format="b64_json")
+    def run_with(self, service: FakeAccountService, side_effects, max_retries: int = 3, message_as_error: bool = False):
+        request = ConversationRequest(
+            model="gpt-image-2",
+            prompt="draw",
+            response_format="b64_json",
+            message_as_error=message_as_error,
+        )
         original_retries = conversation.config.data.get("image_max_account_retries")
 
         def fake_stream(_backend, _request, index=1, total=1):
             effect = side_effects.pop(0)
             if isinstance(effect, BaseException):
                 raise effect
+            if isinstance(effect, ImageOutput):
+                yield effect
+                return
             yield ImageOutput(kind="result", model="gpt-image-2", index=index, total=total, data=[{"b64_json": "ZmFrZQ=="}])
 
         try:
@@ -71,8 +79,44 @@ class ImageAccountRetryTests(unittest.TestCase):
         )
 
         self.assertEqual(outputs[0].kind, "result")
+        self.assertEqual(outputs[0].retry_count, 1)
+        self.assertEqual(outputs[0].attempted_accounts, 2)
+        self.assertEqual(outputs[0].retry_reasons, ["generation_error"])
         self.assertEqual(service.results, [("token-one", False), ("token-two", True)])
         self.assertEqual(service.requested_exclusions[1], {"token-one"})
+
+    def test_text_message_instead_of_image_switches_account(self):
+        service = FakeAccountService(["token-one", "token-two"])
+        outputs = self.run_with(
+            service,
+            [ImageOutput(kind="message", model="gpt-image-2", index=1, total=1, text="你的提示词合规，可以生成。"), "ok"],
+            max_retries=1,
+            message_as_error=True,
+        )
+
+        self.assertEqual(outputs[0].kind, "result")
+        self.assertEqual(outputs[0].retry_count, 1)
+        self.assertEqual(outputs[0].attempted_accounts, 2)
+        self.assertEqual(service.results, [("token-one", False), ("token-two", True)])
+        self.assertEqual(service.requested_exclusions[1], {"token-one"})
+
+    def test_collect_image_outputs_includes_internal_retry_info(self):
+        result = collect_image_outputs([
+            ImageOutput(
+                kind="result",
+                model="gpt-image-2",
+                index=1,
+                total=1,
+                data=[{"url": "https://example.test/image.png"}],
+                retry_count=2,
+                attempted_accounts=3,
+                retry_reasons=["text_reply", "upstream_http"],
+            )
+        ])
+
+        self.assertEqual(result["_image_retry_count"], 2)
+        self.assertEqual(result["_image_attempted_accounts"], 3)
+        self.assertEqual(result["_image_retry_reasons"], ["text_reply", "upstream_http"])
 
     def test_zero_retries_returns_first_recoverable_error(self):
         service = FakeAccountService(["token-one", "token-two"])

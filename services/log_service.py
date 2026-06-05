@@ -202,16 +202,23 @@ def _collect_image_retry_info(value: object) -> dict[str, Any]:
     return info
 
 
-def _strip_internal_response_fields(value: object) -> object:
+def _strip_internal_response_fields(value: object, extra_keys: set[str] | None = None) -> object:
+    hidden_keys = INTERNAL_RESPONSE_KEYS | (extra_keys or set())
     if isinstance(value, dict):
         return {
-            key: _strip_internal_response_fields(item)
+            key: _strip_internal_response_fields(item, extra_keys)
             for key, item in value.items()
-            if key not in INTERNAL_RESPONSE_KEYS
+            if key not in hidden_keys
         }
     if isinstance(value, list):
-        return [_strip_internal_response_fields(item) for item in value]
+        return [_strip_internal_response_fields(item, extra_keys) for item in value]
     return value
+
+
+def _response_hidden_keys(endpoint: str) -> set[str]:
+    if str(endpoint or "").startswith("/v1/images"):
+        return {"urls"}
+    return set()
 
 
 def _request_excerpt(text: object, limit: int = 1000) -> str:
@@ -289,7 +296,7 @@ class LoggedCall:
 
         if isinstance(result, dict):
             self.log("调用完成", result)
-            response = _strip_internal_response_fields(dict(result))
+            response = _strip_internal_response_fields(dict(result), _response_hidden_keys(self.endpoint))
             return response
 
         sender = anthropic_sse_stream if sse == "anthropic" else sse_json_stream
@@ -324,7 +331,7 @@ class LoggedCall:
                 account_emails.extend(_collect_account_emails(item))
                 conversation_ids.extend(_collect_conversation_ids(item))
                 image_retry_info.update(_collect_image_retry_info(item))
-                yield _strip_internal_response_fields(item)
+                yield _strip_internal_response_fields(item, _response_hidden_keys(self.endpoint))
         except Exception as exc:
             failed = True
             self.log(

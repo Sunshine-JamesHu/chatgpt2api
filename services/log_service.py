@@ -14,7 +14,7 @@ from fastapi import HTTPException
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from services.config import DATA_DIR
+from services.config import DATA_DIR, config
 from services.protocol.error_response import anthropic_error_response, openai_error_response
 from utils.helper import anthropic_sse_stream, sse_json_stream
 
@@ -217,7 +217,10 @@ def _strip_internal_response_fields(value: object, extra_keys: set[str] | None =
 
 def _response_hidden_keys(endpoint: str) -> set[str]:
     if str(endpoint or "").startswith("/v1/images"):
-        return {"urls"}
+        hidden = {"urls"}
+        if not config.image_response_include_url:
+            hidden.add("url")
+        return hidden
     return set()
 
 

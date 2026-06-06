@@ -224,10 +224,6 @@ def save_image_bytes(image_data: bytes, base_url: str | None = None) -> str:
     return image_storage_service.save(image_data, base_url).url
 
 
-def _should_return_image_url(base_url: str | None = None) -> bool:
-    return config.image_response_include_url
-
-
 def message_text(content: Any) -> str:
     if isinstance(content, str):
         return content
@@ -353,12 +349,17 @@ def format_image_result(
             continue
         revised_prompt = str(item.get("revised_prompt") or prompt).strip() or prompt
         image_url = save_image_bytes(base64.b64decode(b64_json), base_url)
-        result_item: dict[str, Any] = {"revised_prompt": revised_prompt}
         if response_format == "b64_json":
-            result_item["b64_json"] = b64_json
-        if _should_return_image_url(base_url):
-            result_item["url"] = image_url
-        data.append(result_item)
+            data.append({
+                "b64_json": b64_json,
+                "url": image_url,
+                "revised_prompt": revised_prompt,
+            })
+        else:
+            data.append({
+                "url": image_url,
+                "revised_prompt": revised_prompt,
+            })
     result: dict[str, Any] = {"created": created or int(time.time()), "data": data}
     if message and not data:
         result["message"] = message

@@ -25,7 +25,7 @@ class LogImageRetryInfoTests(unittest.TestCase):
         with mock.patch("services.log_service.log_service.add") as add:
             response = asyncio.run(call.run(handler))
 
-        self.assertEqual(response["data"], [{"url": "https://example.test/image.png"}])
+        self.assertEqual(response["data"], [{}])
         self.assertNotIn("urls", response)
         self.assertEqual(add.call_args.args[2]["urls"], ["https://example.test/image.png"])
 
@@ -64,15 +64,31 @@ class LogImageRetryInfoTests(unittest.TestCase):
 
         self.assertEqual(response, {"data": [{"url": "https://example.test/image.png"}]})
 
-    def test_image_response_strips_top_level_urls_but_keeps_data_url(self):
-        response = _strip_internal_response_fields(
-            {
-                "created": 1,
-                "data": [{"url": "https://example.test/image.png"}],
-                "urls": ["https://example.test/image.png"],
-            },
-            _response_hidden_keys("/v1/images/generations"),
-        )
+    def test_image_response_strips_top_level_urls_and_data_url_by_default(self):
+        with mock.patch("services.log_service.config") as fake_config:
+            fake_config.image_response_include_url = False
+            response = _strip_internal_response_fields(
+                {
+                    "created": 1,
+                    "data": [{"url": "https://example.test/image.png"}],
+                    "urls": ["https://example.test/image.png"],
+                },
+                _response_hidden_keys("/v1/images/generations"),
+            )
+
+        self.assertEqual(response, {"created": 1, "data": [{}]})
+
+    def test_image_response_keeps_data_url_when_enabled(self):
+        with mock.patch("services.log_service.config") as fake_config:
+            fake_config.image_response_include_url = True
+            response = _strip_internal_response_fields(
+                {
+                    "created": 1,
+                    "data": [{"url": "https://example.test/image.png"}],
+                    "urls": ["https://example.test/image.png"],
+                },
+                _response_hidden_keys("/v1/images/generations"),
+            )
 
         self.assertEqual(response, {"created": 1, "data": [{"url": "https://example.test/image.png"}]})
 

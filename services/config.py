@@ -306,6 +306,10 @@ class ConfigStore:
             return 3
 
     @property
+    def image_response_include_url(self) -> bool:
+        return _normalize_bool(self.data.get("image_response_include_url"), False)
+
+    @property
     def image_parallel_generation(self) -> bool:
         value = self.data.get("image_parallel_generation", True)
         if isinstance(value, str):
@@ -430,6 +434,7 @@ class ConfigStore:
         data["image_poll_initial_wait_secs"] = self.image_poll_initial_wait_secs
         data["image_account_concurrency"] = self.image_account_concurrency
         data["image_max_account_retries"] = self.image_max_account_retries
+        data["image_response_include_url"] = self.image_response_include_url
         data["image_parallel_generation"] = self.image_parallel_generation
         data["auto_remove_invalid_accounts"] = self.auto_remove_invalid_accounts
         data["auto_remove_rate_limited_accounts"] = self.auto_remove_rate_limited_accounts
@@ -459,6 +464,10 @@ class ConfigStore:
             next_data["chat_completion_cache"] = _normalize_chat_completion_cache_settings(
                 next_data.get("chat_completion_cache")
             )
+        next_data["image_response_include_url"] = _normalize_bool(
+            next_data.get("image_response_include_url"),
+            False,
+        )
         next_data.pop("backup_state", None)
         self.data = next_data
         self._save()

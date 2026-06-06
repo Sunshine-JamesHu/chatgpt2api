@@ -27,6 +27,7 @@ export function ConfigCard() {
   const setImagePollTimeoutSecs = useSettingsStore((state) => state.setImagePollTimeoutSecs);
   const setImageAccountConcurrency = useSettingsStore((state) => state.setImageAccountConcurrency);
   const setImageMaxAccountRetries = useSettingsStore((state) => state.setImageMaxAccountRetries);
+  const setImageResponseIncludeUrl = useSettingsStore((state) => state.setImageResponseIncludeUrl);
   const setImageSettleEnabled = useSettingsStore((state) => state.setImageSettleEnabled);
   const setImageSettleSecs = useSettingsStore((state) => state.setImageSettleSecs);
   const setImageTimeoutRetrySecs = useSettingsStore((state) => state.setImageTimeoutRetrySecs);
@@ -143,6 +144,17 @@ export function ConfigCard() {
               className="h-10 rounded-xl border-stone-200 bg-white"
             />
             <p className="text-xs text-stone-500">用于生成图片结果的访问前缀地址。</p>
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm text-stone-700">图片 API 返回 url 字段</label>
+            <div className="flex items-center gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-700">
+              <Checkbox
+                checked={Boolean(config?.image_response_include_url)}
+                onCheckedChange={(checked) => setImageResponseIncludeUrl(Boolean(checked))}
+              />
+              <span>返回 data[].url</span>
+            </div>
+            <p className="text-xs text-stone-500">关闭后 data[] 不返回 url；开启后按现有图片访问地址配置返回 url。</p>
           </div>
           <div className="space-y-2">
             <label className="text-sm text-stone-700">图片自动清理</label>

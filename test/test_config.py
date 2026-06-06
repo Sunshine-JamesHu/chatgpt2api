@@ -78,6 +78,20 @@ class ConfigLoadingTests(unittest.TestCase):
             path.write_text(json.dumps({"auth-key": "test-auth", "image_max_account_retries": 99}), encoding="utf-8")
             self.assertEqual(module.ConfigStore(path).image_max_account_retries, 20)
 
+    def test_image_response_include_url_is_normalized(self) -> None:
+        module = self.config_module
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+
+            path.write_text(json.dumps({"auth-key": "test-auth"}), encoding="utf-8")
+            self.assertFalse(module.ConfigStore(path).image_response_include_url)
+
+            path.write_text(json.dumps({"auth-key": "test-auth", "image_response_include_url": "true"}), encoding="utf-8")
+            self.assertTrue(module.ConfigStore(path).image_response_include_url)
+
+            path.write_text(json.dumps({"auth-key": "test-auth", "image_response_include_url": "false"}), encoding="utf-8")
+            self.assertFalse(module.ConfigStore(path).image_response_include_url)
+
 
 if __name__ == "__main__":
     unittest.main()

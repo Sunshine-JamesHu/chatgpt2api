@@ -137,6 +137,22 @@ class ImageAccountRetryTests(unittest.TestCase):
         self.assertEqual(service.results, [("token-one", False)])
         self.assertEqual(len(service.requested_exclusions), 1)
 
+    def test_policy_text_reply_does_not_switch_account(self):
+        service = FakeAccountService(["token-one", "token-two"])
+
+        with self.assertRaises(ImageGenerationError) as ctx:
+            self.run_with(
+                service,
+                [ImageOutput(kind="message", model="gpt-image-2", index=1, total=1, text="抱歉，我无法生成包含性暗示、暴力姿势或相关擦边内容的图像请求。")],
+                max_retries=3,
+                message_as_error=True,
+            )
+
+        self.assertEqual(ctx.exception.code, "content_policy_violation")
+        self.assertEqual(ctx.exception.retry_count, 0)
+        self.assertEqual(service.results, [("token-one", False)])
+        self.assertEqual(len(service.requested_exclusions), 1)
+
     def test_recoverable_upstream_5xx_switches_account(self):
         service = FakeAccountService(["token-one", "token-two"])
         outputs = self.run_with(

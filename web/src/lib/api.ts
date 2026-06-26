@@ -164,6 +164,12 @@ export type SettingsConfig = {
     model?: string;
     prompt?: string;
   };
+  prompt_guard?: {
+    enabled?: boolean;
+    base_url?: string;
+    auth_token?: string;
+    model?: string;
+  };
   refresh_account_interval_minute?: number | string;
   image_retention_days?: number | string;
   image_poll_timeout_secs?: number | string;

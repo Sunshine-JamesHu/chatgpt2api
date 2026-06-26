@@ -198,6 +198,12 @@ function normalizeConfig(config: SettingsConfig): SettingsConfig {
       model: String(config.ai_review?.model || ""),
       prompt: String(config.ai_review?.prompt || ""),
     },
+    prompt_guard: {
+      enabled: Boolean(config.prompt_guard?.enabled),
+      base_url: String(config.prompt_guard?.base_url || ""),
+      auth_token: String(config.prompt_guard?.auth_token || ""),
+      model: String(config.prompt_guard?.model || ""),
+    },
     image_storage: {
       enabled: Boolean(imageStorage.enabled),
       mode: imageStorageMode,
@@ -318,6 +324,7 @@ type SettingsStore = {
   setGlobalSystemPrompt: (value: string) => void;
   setSensitiveWordsText: (value: string) => void;
   setAIReviewField: (key: "enabled" | "base_url" | "api_key" | "model" | "prompt", value: string | boolean) => void;
+  setPromptGuardField: (key: "enabled" | "base_url" | "auth_token" | "model", value: string | boolean) => void;
   setImageStorageField: (key: keyof ImageStorageSettings, value: string | boolean) => void;
   setProxyRuntimeField: <K extends keyof ProxyRuntimeSettings>(key: K, value: ProxyRuntimeSettings[K]) => void;
   setProxyRuntimeClearanceField: <K extends keyof ProxyRuntimeSettings["clearance"]>(key: K, value: ProxyRuntimeSettings["clearance"][K]) => void;
@@ -470,6 +477,12 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
           api_key: String(config.ai_review?.api_key || "").trim(),
           model: String(config.ai_review?.model || "").trim(),
           prompt: String(config.ai_review?.prompt || "").trim(),
+        },
+        prompt_guard: {
+          enabled: Boolean(config.prompt_guard?.enabled),
+          base_url: String(config.prompt_guard?.base_url || "").trim(),
+          auth_token: String(config.prompt_guard?.auth_token || "").trim(),
+          model: String(config.prompt_guard?.model || "").trim(),
         },
         image_storage: {
           enabled: Boolean(config.image_storage?.enabled),
@@ -642,6 +655,10 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
 
   setAIReviewField: (key, value) => {
     set((state) => state.config ? { config: { ...state.config, ai_review: { ...(state.config.ai_review || {}), [key]: value } } } : {});
+  },
+
+  setPromptGuardField: (key, value) => {
+    set((state) => state.config ? { config: { ...state.config, prompt_guard: { ...(state.config.prompt_guard || {}), [key]: value } } } : {});
   },
 
   setImageStorageField: (key, value) => {

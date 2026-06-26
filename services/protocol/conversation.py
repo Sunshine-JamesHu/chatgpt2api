@@ -137,6 +137,8 @@ def image_stream_error_message(message: str) -> str:
 
 
 def is_recoverable_image_generation_error(exc: ImageGenerationError) -> bool:
+    if exc.code == "content_policy_violation" or is_image_policy_rejection_message(str(exc)):
+        return False
     if exc.error_type == "invalid_request_error" and exc.code not in {"no_image_generated", "upstream_text_reply"}:
         return False
     if exc.status_code in {408, 409, 425, 429}:

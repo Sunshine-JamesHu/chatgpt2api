@@ -63,8 +63,11 @@ class ImageTasksApiTests(unittest.TestCase):
     def setUp(self):
         self.fake_service = FakeImageTaskService()
         self.service_patcher = mock.patch.object(image_tasks_module, "image_task_service", self.fake_service)
+        self.filter_patcher = mock.patch.object(image_tasks_module, "filter_or_log", mock.AsyncMock())
         self.service_patcher.start()
+        self.filter_patcher.start()
         self.addCleanup(self.service_patcher.stop)
+        self.addCleanup(self.filter_patcher.stop)
         app = FastAPI()
         app.include_router(image_tasks_module.create_router())
         self.client = TestClient(app)
@@ -99,6 +102,12 @@ class ImageTasksApiTests(unittest.TestCase):
         self.assertEqual(len(self.fake_service.edit_calls), 1)
         images = self.fake_service.edit_calls[0][1]["images"]
         self.assertEqual(len(images), 2)
+        filter_mock = image_tasks_module.filter_or_log
+        filter_mock.assert_awaited_once()
+        args = filter_mock.await_args.args
+        self.assertEqual(args[1], "edit")
+        self.assertEqual(len(args[2]), 2)
+        self.assertEqual([item[0] for item in args[2]], [b"one", b"two"])
 
     def test_create_edit_task_accepts_image_url(self):
         """测试图片编辑任务接口支持表单 image_url 引用。"""

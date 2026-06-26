@@ -44,6 +44,12 @@
     "model": "",
     "prompt": ""
   },
+  "prompt_guard": {
+    "enabled": false,
+    "base_url": "",
+    "auth_token": "",
+    "model": ""
+  },
   "backup": {
     "enabled": false,
     "provider": "cloudflare_r2",

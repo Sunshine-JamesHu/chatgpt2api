@@ -505,6 +505,11 @@ class ConfigStore:
         return value if isinstance(value, dict) else {}
 
     @property
+    def prompt_guard(self) -> dict[str, object]:
+        value = self.data.get("prompt_guard")
+        return value if isinstance(value, dict) else {}
+
+    @property
     def global_system_prompt(self) -> str:
         return str(self.data.get("global_system_prompt") or "").strip()
 
@@ -567,6 +572,7 @@ class ConfigStore:
         data["log_levels"] = self.log_levels
         data["sensitive_words"] = self.sensitive_words
         data["ai_review"] = self.ai_review
+        data["prompt_guard"] = self.prompt_guard
         data["global_system_prompt"] = self.global_system_prompt
         data["backup"] = self.get_backup_settings()
         data["image_storage"] = self.get_image_storage_settings()

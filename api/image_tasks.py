@@ -27,9 +27,9 @@ def _parse_task_ids(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
-async def filter_or_log(call: LoggedCall, text: str) -> None:
+async def filter_or_log(call: LoggedCall, text: str, *guard_values: object) -> None:
     try:
-        await run_in_threadpool(check_request, text)
+        await run_in_threadpool(check_request, text, *guard_values)
     except HTTPException as exc:
         call.log("调用失败", status="failed", error=str(exc.detail))
         raise
@@ -53,7 +53,7 @@ def create_router() -> APIRouter:
         authorization: str | None = Header(default=None),
     ):
         identity = require_identity(authorization)
-        await filter_or_log(LoggedCall(identity, "/api/image-tasks/generations", body.model, "文生图任务", request_text=body.prompt), body.prompt)
+        await filter_or_log(LoggedCall(identity, "/api/image-tasks/generations", body.model, "文生图任务", request_text=body.prompt), body.prompt, body.model_dump(mode="python"))
         try:
             return await run_in_threadpool(
                 image_task_service.submit_generation,
@@ -80,9 +80,9 @@ def create_router() -> APIRouter:
             raise HTTPException(status_code=400, detail={"error": "client_task_id is required"})
         prompt = str(payload["prompt"])
         model = str(payload["model"])
-        await filter_or_log(LoggedCall(identity, "/api/image-tasks/edits", model, "图生图任务", request_text=prompt), prompt)
         images = await read_image_sources(image_sources)
         masks = await read_image_sources(mask_sources) if mask_sources else None
+        await filter_or_log(LoggedCall(identity, "/api/image-tasks/edits", model, "图生图任务", request_text=prompt), prompt, images)
         try:
             return await run_in_threadpool(
                 image_task_service.submit_edit,

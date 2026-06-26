@@ -1,6 +1,6 @@
 "use client";
 
-import { Cloud, LoaderCircle, PlugZap, RefreshCw, Save } from "lucide-react";
+import { Cloud, LoaderCircle, PlugZap, RefreshCw, Save, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -40,6 +40,7 @@ export function ConfigCard() {
   const setGlobalSystemPrompt = useSettingsStore((state) => state.setGlobalSystemPrompt);
   const setSensitiveWordsText = useSettingsStore((state) => state.setSensitiveWordsText);
   const setAIReviewField = useSettingsStore((state) => state.setAIReviewField);
+  const setPromptGuardField = useSettingsStore((state) => state.setPromptGuardField);
   const setImageStorageField = useSettingsStore((state) => state.setImageStorageField);
   const testImageStorage = useSettingsStore((state) => state.testImageStorage);
   const syncImagesToWebDAV = useSettingsStore((state) => state.syncImagesToWebDAV);
@@ -442,6 +443,36 @@ export function ConfigCard() {
             <div className="space-y-2">
               <label className="text-sm text-stone-700">审核提示词</label>
               <Textarea value={String(config?.ai_review?.prompt || "")} onChange={(event) => setAIReviewField("prompt", event.target.value)} placeholder="判断用户请求是否允许。只回答 ALLOW 或 REJECT。" className="min-h-24 rounded-xl border-stone-200 bg-white text-xs shadow-none" />
+            </div>
+          </div>
+          <div className="space-y-4 rounded-xl border border-stone-200 bg-white px-4 py-3 md:col-span-2">
+            <label className="flex items-center gap-3 text-sm text-stone-700">
+              <Checkbox
+                checked={Boolean(config?.prompt_guard?.enabled)}
+                onCheckedChange={(checked) => setPromptGuardField("enabled", Boolean(checked))}
+              />
+              启用护栏审核
+            </label>
+            <p className="text-xs leading-6 text-stone-500">
+              调用 OpenAI 兼容的 /v1/moderations 护栏服务；如果同时启用 AI 审核，会先执行 AI 审核，再执行护栏审核。
+            </p>
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="space-y-2">
+                <label className="text-sm text-stone-700">Base URL</label>
+                <Input value={String(config?.prompt_guard?.base_url || "")} onChange={(event) => setPromptGuardField("base_url", event.target.value)} placeholder="http://127.0.0.1:8080" className="h-10 rounded-xl border-stone-200 bg-white" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm text-stone-700">Auth Token</label>
+                <Input type="password" value={String(config?.prompt_guard?.auth_token || "")} onChange={(event) => setPromptGuardField("auth_token", event.target.value)} placeholder="Bearer token" className="h-10 rounded-xl border-stone-200 bg-white" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm text-stone-700">Model</label>
+                <Input value={String(config?.prompt_guard?.model || "")} onChange={(event) => setPromptGuardField("model", event.target.value)} placeholder="omni-moderation-latest" className="h-10 rounded-xl border-stone-200 bg-white" />
+              </div>
+            </div>
+            <div className="flex items-center gap-2 rounded-lg border border-stone-100 bg-stone-50 px-3 py-2 text-xs leading-5 text-stone-500">
+              <ShieldCheck className="size-4 shrink-0 text-stone-500" />
+              留空 Model 时由护栏服务使用自身默认模型。
             </div>
           </div>
         </div>

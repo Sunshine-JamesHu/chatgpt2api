@@ -69,9 +69,9 @@ class EditableFileTaskRequest(BaseModel):
     client_task_id: str | None = None
 
 
-async def filter_or_log(call: LoggedCall, text: str) -> None:
+async def filter_or_log(call: LoggedCall, text: str, *guard_values: object) -> None:
     try:
-        await run_in_threadpool(check_request, text)
+        await run_in_threadpool(check_request, text, *guard_values)
     except HTTPException as exc:
         call.log("调用失败", status="failed", error=str(exc.detail))
         raise
@@ -98,7 +98,7 @@ def create_router() -> APIRouter:
         payload = body.model_dump(mode="python")
         payload["base_url"] = resolve_image_base_url(request)
         call = LoggedCall(identity, "/v1/images/generations", body.model, "文生图", request_text=body.prompt)
-        await filter_or_log(call, body.prompt)
+        await filter_or_log(call, body.prompt, payload)
         return await call.run(openai_v1_image_generations.handle, payload)
 
     @router.post("/v1/images/edits")
@@ -111,10 +111,10 @@ def create_router() -> APIRouter:
         prompt = str(payload["prompt"])
         model = str(payload["model"])
         call = LoggedCall(identity, "/v1/images/edits", model, "图生图", request_text=prompt)
-        await filter_or_log(call, prompt)
         payload["images"] = await read_image_sources(image_sources)
         if mask_sources:
             payload["mask"] = await read_image_sources(mask_sources)
+        await filter_or_log(call, prompt, payload.get("images"))
         payload["base_url"] = resolve_image_base_url(request)
         return await call.run(openai_v1_image_edit.handle, payload)
 
@@ -132,7 +132,7 @@ def create_router() -> APIRouter:
             request_text=request_preview,
             request_shape=request_shape(payload.get("messages")),
         )
-        await filter_or_log(call, request_preview)
+        await filter_or_log(call, request_preview, payload.get("prompt"), payload.get("messages"))
         return await call.run(openai_v1_chat_complete.handle, payload)
 
     @router.post("/v1/responses")
@@ -149,7 +149,7 @@ def create_router() -> APIRouter:
             request_text=request_preview,
             request_shape=request_shape(payload.get("input")),
         )
-        await filter_or_log(call, request_preview)
+        await filter_or_log(call, request_preview, payload.get("input"), payload.get("instructions"))
         return await call.run(openai_v1_response.handle, payload)
 
     @router.post("/v1/messages")
@@ -164,7 +164,7 @@ def create_router() -> APIRouter:
         model = str(payload.get("model") or "auto")
         request_preview = request_text(payload.get("system"), payload.get("messages"), payload.get("tools"))
         call = LoggedCall(identity, "/v1/messages", model, "Messages", request_text=request_preview)
-        await filter_or_log(call, request_preview)
+        await filter_or_log(call, request_preview, payload.get("system"), payload.get("messages"), payload.get("tools"))
         return await call.run(anthropic_v1_messages.handle, payload, sse="anthropic")
 
     @router.post("/v1/search")
@@ -191,7 +191,11 @@ def create_router() -> APIRouter:
     @router.post("/v1/ppt/generations")
     async def create_ppt_task(body: EditableFileTaskRequest, request: Request, authorization: str | None = Header(default=None)):
         identity = require_identity(authorization)
-        await filter_or_log(LoggedCall(identity, "/v1/ppt/generations", "gpt-5-5-thinking", "PPT生成任务", request_text=body.prompt), body.prompt)
+        await filter_or_log(
+            LoggedCall(identity, "/v1/ppt/generations", "gpt-5-5-thinking", "PPT生成任务", request_text=body.prompt),
+            body.prompt,
+            [{"image_base64": image} for image in body.base64_images],
+        )
         return await run_in_threadpool(
             editable_file_task_service.submit_ppt,
             identity,
@@ -204,7 +208,11 @@ def create_router() -> APIRouter:
     @router.post("/v1/psd/generations")
     async def create_psd_task(body: EditableFileTaskRequest, request: Request, authorization: str | None = Header(default=None)):
         identity = require_identity(authorization)
-        await filter_or_log(LoggedCall(identity, "/v1/psd/generations", "gpt-5-5-thinking", "PSD生成任务", request_text=body.prompt), body.prompt)
+        await filter_or_log(
+            LoggedCall(identity, "/v1/psd/generations", "gpt-5-5-thinking", "PSD生成任务", request_text=body.prompt),
+            body.prompt,
+            [{"image_base64": image} for image in body.base64_images],
+        )
         return await run_in_threadpool(
             editable_file_task_service.submit_psd,
             identity,

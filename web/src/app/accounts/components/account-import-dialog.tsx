@@ -186,7 +186,6 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pendingAccountJsonImport, setPendingAccountJsonImport] = useState<PendingAccountJsonImport | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [oauthEmailHint, setOauthEmailHint] = useState("");
   const [oauthSession, setOauthSession] = useState<OAuthLoginStartResponse | null>(null);
   const [oauthCallbackInput, setOauthCallbackInput] = useState("");
   const [oauthStarting, setOauthStarting] = useState(false);
@@ -201,7 +200,6 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
     setCodexAuthInput("");
     setPendingAccountJsonImport(null);
     setConfirmOpen(false);
-    setOauthEmailHint("");
     setOauthSession(null);
     setOauthCallbackInput("");
     setOauthStarting(false);
@@ -254,7 +252,7 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
   const startOAuthSession = async ({ openPage }: { openPage: boolean }) => {
     setOauthStarting(true);
     try {
-      const data = await startOAuthLogin(oauthEmailHint.trim());
+      const data = await startOAuthLogin("");
       setOauthSession(data);
       setOauthCallbackInput("");
       if (openPage && typeof window !== "undefined") {
@@ -585,22 +583,10 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
           <div className="rounded-2xl border border-stone-200 bg-stone-50 p-4 text-sm leading-6 text-stone-600 space-y-2">
             <div className="font-medium text-stone-800">操作步骤</div>
             <ol className="list-decimal pl-5 space-y-1">
-              <li>（可选）填写你 ChatGPT 账号的邮箱，登录页会预填。</li>
               <li>点击下方"打开授权页面"，在新标签里登录自己的 ChatGPT 账号。</li>
               <li>登录完成后浏览器会跳到 <code className="rounded bg-stone-200 px-1">platform.openai.com/auth/callback?code=...</code>。立刻从地址栏复制整段 URL（或开 F12 在 Network 里抓到 callback 那一行，右键 Copy → Copy URL）。</li>
               <li>把 callback URL 粘到下面输入框，点"完成导入"。</li>
             </ol>
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-stone-700">邮箱（可选预填）</label>
-            <input
-              type="email"
-              placeholder="you@example.com"
-              value={oauthEmailHint}
-              onChange={(event) => setOauthEmailHint(event.target.value)}
-              disabled={Boolean(oauthSession) || oauthStarting}
-              className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm outline-none focus:border-stone-400"
-            />
           </div>
           <div className="flex flex-wrap gap-2">
             <Button
@@ -772,8 +758,8 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
           <Upload className="size-4" />
           导入
         </Button>
-        <DialogContent showCloseButton={false} className="rounded-2xl p-6">
-          <DialogHeader className="gap-2">
+        <DialogContent showCloseButton={false} className="flex max-h-[calc(100dvh-2rem)] w-[min(96vw,760px)] flex-col overflow-hidden rounded-2xl p-0">
+          <DialogHeader className="shrink-0 gap-2 px-6 pt-6">
             <DialogTitle>
               {method === "menu"
                 ? "导入账户"
@@ -802,9 +788,11 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
             </DialogDescription>
           </DialogHeader>
 
-          {renderMethodBody()}
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+            {renderMethodBody()}
+          </div>
 
-          <DialogFooter className="pt-2">
+          <DialogFooter className="shrink-0 border-t border-stone-100 px-6 py-4">
             <Button
               variant="secondary"
               className="h-10 rounded-xl bg-stone-100 px-5 text-stone-700 hover:bg-stone-200"

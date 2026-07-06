@@ -1,18 +1,15 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useRef, useState, type ChangeEvent } from "react";
 import {
   ArrowLeft,
   Copy,
   ExternalLink,
-  FileJson,
   FileText,
   Files,
   KeyRound,
   LoaderCircle,
   LogIn,
-  ServerCog,
   Upload,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -181,7 +178,6 @@ function MethodCard({
 }
 
 export function AccountImportDialog({ disabled, onImported }: AccountImportDialogProps) {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [method, setMethod] = useState<ImportMethod>("menu");
   const [tokenInput, setTokenInput] = useState("");
@@ -255,23 +251,35 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
     await submitTokens(splitTokens(tokenInput), "Access Token 导入完成");
   };
 
-  // 起授权：拿 authorize URL，立刻在新窗口打开，方便用户登录
-  const handleStartOAuth = async () => {
+  const startOAuthSession = async ({ openPage }: { openPage: boolean }) => {
     setOauthStarting(true);
     try {
       const data = await startOAuthLogin(oauthEmailHint.trim());
       setOauthSession(data);
       setOauthCallbackInput("");
-      if (typeof window !== "undefined") {
+      if (openPage && typeof window !== "undefined") {
         window.open(data.authorize_url, "_blank", "noopener,noreferrer");
       }
-      toast.success("已打开 OpenAI 授权页面，请在登录后复制 callback URL 回来");
+      toast.success(openPage ? "已打开 OpenAI 授权页面，请在登录后复制 callback URL 回来" : "授权链接已生成");
     } catch (error) {
       const message = error instanceof Error ? error.message : "OAuth 起始失败";
       toast.error(message);
     } finally {
       setOauthStarting(false);
     }
+  };
+
+  // 起授权：拿 authorize URL，立刻在新窗口打开，方便用户登录
+  const handleStartOAuth = async () => {
+    if (oauthSession?.authorize_url && typeof window !== "undefined") {
+      window.open(oauthSession.authorize_url, "_blank", "noopener,noreferrer");
+      return;
+    }
+    await startOAuthSession({ openPage: true });
+  };
+
+  const handleGenerateAuthorizeUrl = async () => {
+    await startOAuthSession({ openPage: false });
   };
 
   // 用粘贴回来的 callback URL 完成换 token + 落盘
@@ -316,16 +324,37 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
     if (!oauthSession) {
       return;
     }
+    const value = oauthSession.authorize_url;
     try {
       if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(oauthSession.authorize_url);
+        await navigator.clipboard.writeText(value);
         toast.success("授权 URL 已复制到剪贴板");
-      } else {
-        toast.error("当前环境不支持自动复制，请手动选择并复制");
+        return;
       }
     } catch {
-      toast.error("复制失败，请手动选择并复制");
+      // Fall back below for browsers that expose Clipboard API but reject writes.
     }
+
+    try {
+      const textarea = document.createElement("textarea");
+      textarea.value = value;
+      textarea.setAttribute("readonly", "true");
+      textarea.style.position = "fixed";
+      textarea.style.left = "-9999px";
+      textarea.style.top = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      textarea.setSelectionRange(0, textarea.value.length);
+      const copied = document.execCommand("copy");
+      document.body.removeChild(textarea);
+      if (copied) {
+        toast.success("授权 URL 已复制到剪贴板");
+        return;
+      }
+    } catch {
+      // Report a single user-facing error below.
+    }
+    toast.error("复制失败，请手动选择并复制");
   };
 
   const handleTxtSelected = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -573,7 +602,7 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
               className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm outline-none focus:border-stone-400"
             />
           </div>
-          {!oauthSession ? (
+          <div className="flex flex-wrap gap-2">
             <Button
               type="button"
               className="h-10 rounded-xl bg-stone-950 text-white hover:bg-stone-800"
@@ -583,30 +612,36 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
               {oauthStarting ? <LoaderCircle className="size-4 animate-spin" /> : <ExternalLink className="size-4" />}
               打开授权页面
             </Button>
-          ) : (
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 rounded-xl border-stone-200 bg-white"
+              onClick={() => void handleGenerateAuthorizeUrl()}
+              disabled={oauthStarting}
+            >
+              {oauthStarting ? <LoaderCircle className="size-4 animate-spin" /> : null}
+              生成授权链接
+            </Button>
+          </div>
+          {oauthSession ? (
             <div className="space-y-3">
-              <div className="rounded-2xl border border-stone-200 bg-white p-3 text-xs leading-6 text-stone-600 break-all font-mono">
-                {oauthSession.authorize_url}
-              </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Textarea
+                  readOnly
+                  value={oauthSession.authorize_url}
+                  className="h-28 min-h-28 resize-none rounded-xl border-stone-200 bg-white font-mono text-xs"
+                />
                 <Button
                   type="button"
                   variant="outline"
-                  className="rounded-xl border-stone-200 bg-white"
+                  className="h-10 shrink-0 rounded-xl border-stone-200 bg-white sm:h-28"
                   onClick={() => void handleCopyAuthorizeUrl()}
                 >
                   <Copy className="size-4" />
-                  复制授权 URL
+                  复制
                 </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="rounded-xl border-stone-200 bg-white"
-                  onClick={() => window.open(oauthSession.authorize_url, "_blank", "noopener,noreferrer")}
-                >
-                  <ExternalLink className="size-4" />
-                  再次打开
-                </Button>
+              </div>
+              <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
                   variant="outline"
@@ -629,7 +664,7 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
                 />
               </div>
             </div>
-          )}
+          ) : null}
           <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
             <div className="font-medium">注意</div>
             <div>
@@ -719,50 +754,6 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
           description="用浏览器登录自己的 ChatGPT 账号，回填 callback URL 即可拿到 refresh_token，后台会自动续期。"
           icon={LogIn}
           onClick={() => setMethod("oauth")}
-        />
-        <MethodCard
-          title="导入 Access Token"
-          description="支持直接粘贴，一行一个；也支持从 TXT 文件读取，一行一个。"
-          icon={KeyRound}
-          onClick={() => setMethod("token")}
-        />
-        <MethodCard
-          title="导入 Session JSON"
-          description="从 chatgpt.com 的 session 接口复制完整 JSON，自动提取 accessToken。"
-          icon={FileJson}
-          onClick={() => setMethod("session")}
-        />
-        <MethodCard
-          title="导入 Codex 认证 JSON"
-          description="粘贴 Codex 认证 JSON，导入后账号来源标记为 codex。"
-          icon={FileJson}
-          onClick={() => setMethod("codex-auth")}
-        />
-        <MethodCard
-          title="导入账号 JSON 文件"
-          description="支持本项目导出的单账号 JSON 或全部账号数组，也兼容 CPA JSON 文件。"
-          icon={Files}
-          onClick={() => setMethod("account-json")}
-        />
-        <MethodCard
-          title="从远程 CPA 服务器导入"
-          description="前往设置页面配置远程 CPA 服务器后再执行导入。"
-          icon={Files}
-          onClick={() => {
-            setOpen(false);
-            resetState();
-            router.push("/settings");
-          }}
-        />
-        <MethodCard
-          title="从 Sub2API 服务器导入"
-          description="前往设置页面配置 Sub2API 服务器，再选择其中的 OpenAI 账号导入。"
-          icon={ServerCog}
-          onClick={() => {
-            setOpen(false);
-            resetState();
-            router.push("/settings");
-          }}
         />
       </div>
     );

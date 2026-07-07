@@ -3,7 +3,6 @@
 import { useRef, useState, type ChangeEvent } from "react";
 import {
   ArrowLeft,
-  Copy,
   ExternalLink,
   FileText,
   Files,
@@ -249,16 +248,16 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
     await submitTokens(splitTokens(tokenInput), "Access Token 导入完成");
   };
 
-  const startOAuthSession = async ({ openPage }: { openPage: boolean }) => {
+  const startOAuthSession = async () => {
     setOauthStarting(true);
     try {
       const data = await startOAuthLogin("");
       setOauthSession(data);
       setOauthCallbackInput("");
-      if (openPage && typeof window !== "undefined") {
+      if (typeof window !== "undefined") {
         window.open(data.authorize_url, "_blank", "noopener,noreferrer");
       }
-      toast.success(openPage ? "已打开 OpenAI 授权页面，请在登录后复制 callback URL 回来" : "授权链接已生成");
+      toast.success("已打开 OpenAI 授权页面，请在登录后复制 callback URL 回来");
     } catch (error) {
       const message = error instanceof Error ? error.message : "OAuth 起始失败";
       toast.error(message);
@@ -273,11 +272,7 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
       window.open(oauthSession.authorize_url, "_blank", "noopener,noreferrer");
       return;
     }
-    await startOAuthSession({ openPage: true });
-  };
-
-  const handleGenerateAuthorizeUrl = async () => {
-    await startOAuthSession({ openPage: false });
+    await startOAuthSession();
   };
 
   // 用粘贴回来的 callback URL 完成换 token + 落盘
@@ -315,44 +310,6 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
     } finally {
       setIsSubmitting(false);
     }
-  };
-
-  // 复制 authorize URL 到剪贴板（适配浏览器和 fallback）
-  const handleCopyAuthorizeUrl = async () => {
-    if (!oauthSession) {
-      return;
-    }
-    const value = oauthSession.authorize_url;
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(value);
-        toast.success("授权 URL 已复制到剪贴板");
-        return;
-      }
-    } catch {
-      // Fall back below for browsers that expose Clipboard API but reject writes.
-    }
-
-    try {
-      const textarea = document.createElement("textarea");
-      textarea.value = value;
-      textarea.setAttribute("readonly", "true");
-      textarea.style.position = "fixed";
-      textarea.style.left = "-9999px";
-      textarea.style.top = "0";
-      document.body.appendChild(textarea);
-      textarea.select();
-      textarea.setSelectionRange(0, textarea.value.length);
-      const copied = document.execCommand("copy");
-      document.body.removeChild(textarea);
-      if (copied) {
-        toast.success("授权 URL 已复制到剪贴板");
-        return;
-      }
-    } catch {
-      // Report a single user-facing error below.
-    }
-    toast.error("复制失败，请手动选择并复制");
   };
 
   const handleTxtSelected = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -598,46 +555,19 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
               {oauthStarting ? <LoaderCircle className="size-4 animate-spin" /> : <ExternalLink className="size-4" />}
               打开授权页面
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className="h-10 rounded-xl border-stone-200 bg-white"
-              onClick={() => void handleGenerateAuthorizeUrl()}
-              disabled={oauthStarting}
-            >
-              {oauthStarting ? <LoaderCircle className="size-4 animate-spin" /> : null}
-              生成授权链接
-            </Button>
           </div>
           {oauthSession ? (
             <div className="space-y-3">
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <Textarea
-                  readOnly
-                  value={oauthSession.authorize_url}
-                  className="h-28 min-h-28 resize-none rounded-xl border-stone-200 bg-white font-mono text-xs"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-10 shrink-0 rounded-xl border-stone-200 bg-white sm:h-28"
-                  onClick={() => void handleCopyAuthorizeUrl()}
-                >
-                  <Copy className="size-4" />
-                  复制
-                </Button>
-              </div>
               <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
                   variant="outline"
                   className="rounded-xl border-stone-200 bg-white"
-                  onClick={() => {
-                    setOauthSession(null);
-                    setOauthCallbackInput("");
-                  }}
+                  onClick={() => void startOAuthSession()}
+                  disabled={oauthStarting}
                 >
-                  重新生成
+                  {oauthStarting ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                  重新打开授权页面
                 </Button>
               </div>
               <div className="space-y-2">
@@ -655,7 +585,7 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
             <div className="font-medium">注意</div>
             <div>
               授权码（code）只能使用一次。如果浏览器的 callback 页加载完成、显示了 OpenAI 的错误页，那 code 大概率已经被消耗，
-              请点击"重新生成"再走一次。整个流程在 10 分钟内完成即可。
+              请点击"重新打开授权页面"再走一次。整个流程在 10 分钟内完成即可。
             </div>
           </div>
         </div>

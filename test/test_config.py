@@ -92,6 +92,71 @@ class ConfigLoadingTests(unittest.TestCase):
             path.write_text(json.dumps({"auth-key": "test-auth", "image_response_include_url": "false"}), encoding="utf-8")
             self.assertFalse(module.ConfigStore(path).image_response_include_url)
 
+    def test_image_upstream_model_slug_is_trimmed_and_returned(self) -> None:
+        module = self.config_module
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+
+            path.write_text(json.dumps({"auth-key": "test-auth"}), encoding="utf-8")
+            store = module.ConfigStore(path)
+            self.assertEqual(store.image_upstream_model_slug, "")
+            self.assertEqual(store.get()["image_upstream_model_slug"], "")
+
+            updated = store.update({"image_upstream_model_slug": "  gpt-5-5-thinking  "})
+
+            self.assertEqual(updated["image_upstream_model_slug"], "gpt-5-5-thinking")
+            self.assertEqual(store.image_upstream_model_slug, "gpt-5-5-thinking")
+
+
+class ImageModelSlugConfigTests(unittest.TestCase):
+    def test_image_model_slug_uses_default_when_config_empty(self) -> None:
+        from services.config import config
+        from services.openai_backend_api import OpenAIBackendAPI
+
+        original_value = config.data.get("image_upstream_model_slug")
+        try:
+            config.data["image_upstream_model_slug"] = ""
+            backend = object.__new__(OpenAIBackendAPI)
+
+            self.assertEqual(backend._image_model_slug("gpt-image-2"), "gpt-5-4")
+        finally:
+            if original_value is None:
+                config.data.pop("image_upstream_model_slug", None)
+            else:
+                config.data["image_upstream_model_slug"] = original_value
+
+    def test_image_model_slug_uses_configured_upstream_model(self) -> None:
+        from services.config import config
+        from services.openai_backend_api import OpenAIBackendAPI
+
+        original_value = config.data.get("image_upstream_model_slug")
+        try:
+            config.data["image_upstream_model_slug"] = "gpt-5-5-thinking"
+            backend = object.__new__(OpenAIBackendAPI)
+
+            self.assertEqual(backend._image_model_slug("gpt-image-2"), "gpt-5-5-thinking")
+        finally:
+            if original_value is None:
+                config.data.pop("image_upstream_model_slug", None)
+            else:
+                config.data["image_upstream_model_slug"] = original_value
+
+    def test_image_model_slug_does_not_override_codex_model(self) -> None:
+        from services.config import config
+        from services.openai_backend_api import CODEX_IMAGE_MODEL, OpenAIBackendAPI
+
+        original_value = config.data.get("image_upstream_model_slug")
+        try:
+            config.data["image_upstream_model_slug"] = "gpt-5-5-thinking"
+            backend = object.__new__(OpenAIBackendAPI)
+
+            self.assertEqual(backend._image_model_slug(CODEX_IMAGE_MODEL), CODEX_IMAGE_MODEL)
+        finally:
+            if original_value is None:
+                config.data.pop("image_upstream_model_slug", None)
+            else:
+                config.data["image_upstream_model_slug"] = original_value
+
 
 if __name__ == "__main__":
     unittest.main()

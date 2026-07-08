@@ -110,5 +110,6 @@
       "url": "https://canvas.best"
     }
   },
-  "image_remove_conversation_after_result": true
+  "image_remove_conversation_after_result": true,
+  "image_upstream_model_slug": "gpt-5-5-thinking"
 }

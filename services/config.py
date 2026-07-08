@@ -430,6 +430,10 @@ class ConfigStore:
             return 3
 
     @property
+    def image_upstream_model_slug(self) -> str:
+        return str(self.data.get("image_upstream_model_slug") or "").strip()
+
+    @property
     def image_response_include_url(self) -> bool:
         return _normalize_bool(self.data.get("image_response_include_url"), False)
 
@@ -571,6 +575,7 @@ class ConfigStore:
         data["image_poll_initial_wait_secs"] = self.image_poll_initial_wait_secs
         data["image_account_concurrency"] = self.image_account_concurrency
         data["image_max_account_retries"] = self.image_max_account_retries
+        data["image_upstream_model_slug"] = self.image_upstream_model_slug
         data["image_response_include_url"] = self.image_response_include_url
         data["image_parallel_generation"] = self.image_parallel_generation
         data["image_remove_conversation_after_result"] = self.image_remove_conversation_after_result
@@ -627,6 +632,7 @@ class ConfigStore:
             next_data.get("image_response_include_url"),
             False,
         )
+        next_data["image_upstream_model_slug"] = str(next_data.get("image_upstream_model_slug") or "").strip()
         if "third_party_apps" in next_data:
             next_data["third_party_apps"] = _normalize_third_party_apps_settings(next_data.get("third_party_apps"))
         if "proxy_runtime" in next_data:

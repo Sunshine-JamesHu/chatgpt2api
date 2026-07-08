@@ -170,6 +170,7 @@ function normalizeConfig(config: SettingsConfig): SettingsConfig {
     image_poll_timeout_secs: Number(config.image_poll_timeout_secs || 120),
     image_account_concurrency: Number(config.image_account_concurrency || 3),
     image_max_account_retries: Number(config.image_max_account_retries ?? 3),
+    image_upstream_model_slug: String(config.image_upstream_model_slug || ""),
     image_response_include_url: Boolean(config.image_response_include_url),
     image_settle_enabled: Boolean(config.image_settle_enabled !== false),
     image_check_before_hit_enabled: Boolean(config.image_check_before_hit_enabled !== false),
@@ -298,6 +299,7 @@ type SettingsStore = {
   setImagePollTimeoutSecs: (value: string) => void;
   setImageAccountConcurrency: (value: string) => void;
   setImageMaxAccountRetries: (value: string) => void;
+  setImageUpstreamModelSlug: (value: string) => void;
   setImageResponseIncludeUrl: (value: boolean) => void;
   setImageSettleEnabled: (value: boolean) => void;
   setImageCheckBeforeHitEnabled: (value: boolean) => void;
@@ -426,6 +428,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         image_poll_timeout_secs: Math.max(1, Number(config.image_poll_timeout_secs) || 120),
         image_account_concurrency: Math.max(1, Number(config.image_account_concurrency) || 3),
         image_max_account_retries: Math.max(0, Math.min(20, Number(config.image_max_account_retries) || 0)),
+        image_upstream_model_slug: String(config.image_upstream_model_slug || "").trim(),
         image_response_include_url: Boolean(config.image_response_include_url),
         image_settle_enabled: Boolean(config.image_settle_enabled !== false),
         image_check_before_hit_enabled: Boolean(config.image_check_before_hit_enabled !== false),
@@ -541,6 +544,10 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
 
   setImageMaxAccountRetries: (value) => {
     set((state) => state.config ? { config: { ...state.config, image_max_account_retries: value } } : {});
+  },
+
+  setImageUpstreamModelSlug: (value) => {
+    set((state) => state.config ? { config: { ...state.config, image_upstream_model_slug: value } } : {});
   },
 
   setImageResponseIncludeUrl: (value) => {

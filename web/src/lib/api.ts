@@ -174,6 +174,7 @@ export type SettingsConfig = {
   image_poll_timeout_secs?: number | string;
   image_account_concurrency?: number | string;
   image_max_account_retries?: number | string;
+  image_upstream_model_slug?: string;
   image_response_include_url?: boolean;
   image_parallel_generation?: boolean;
   image_settle_enabled?: boolean;

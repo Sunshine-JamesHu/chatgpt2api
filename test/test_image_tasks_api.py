@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import api.image_tasks as image_tasks_module
+from services.concurrency import ExecutorSaturated
 
 
 AUTH_HEADERS = {"Authorization": "Bearer chatgpt2api"}
@@ -134,6 +135,21 @@ class ImageTasksApiTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual([item["id"] for item in payload["items"]], ["task-1"])
         self.assertEqual(payload["missing_ids"], ["missing"])
+
+    def test_create_generation_task_returns_503_when_queue_is_full(self):
+        with mock.patch.object(
+            self.fake_service,
+            "submit_generation",
+            side_effect=ExecutorSaturated("image-task queue is full"),
+        ):
+            response = self.client.post(
+                "/api/image-tasks/generations",
+                headers=AUTH_HEADERS,
+                json={"client_task_id": "task-full", "prompt": "cat", "model": "gpt-image-2"},
+            )
+
+        self.assertEqual(response.status_code, 503, response.text)
+        self.assertEqual(response.headers.get("retry-after"), "1")
 
 
 if __name__ == "__main__":

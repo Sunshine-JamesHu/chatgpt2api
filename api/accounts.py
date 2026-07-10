@@ -163,7 +163,7 @@ def create_router() -> APIRouter:
     @router.get("/api/auth/users")
     async def list_user_keys(authorization: str | None = Header(default=None)):
         require_admin(authorization)
-        return {"items": auth_service.list_keys(role="user")}
+        return {"items": await run_in_threadpool(auth_service.list_keys, role="user")}
 
     @router.post("/api/auth/users")
     async def create_user_key(body: UserKeyCreateRequest, authorization: str | None = Header(default=None)):
@@ -210,7 +210,7 @@ def create_router() -> APIRouter:
     @router.get("/api/accounts")
     async def get_accounts(authorization: str | None = Header(default=None)):
         require_admin(authorization)
-        return {"items": account_service.list_accounts()}
+        return {"items": await run_in_threadpool(account_service.list_accounts)}
 
     @router.post("/api/accounts")
     async def create_accounts(body: AccountCreateRequest, authorization: str | None = Header(default=None)):

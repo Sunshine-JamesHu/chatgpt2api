@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import secrets
 import time
@@ -49,7 +50,8 @@ class AccountService:
     def __init__(self, storage_backend: StorageBackend):
         self.storage = storage_backend
         self._lock = Lock()
-        self._token_refresh_lock = Lock()
+        self._token_refresh_locks_guard = Lock()
+        self._token_refresh_locks: dict[str, Lock] = {}
         self._image_slot_condition = Condition(self._lock)
         self._index = 0
         self._accounts = self._load_accounts()
@@ -387,6 +389,27 @@ class AccountService:
         finally:
             session.close()
 
+    @staticmethod
+    def _token_refresh_lock_key(access_token: str, account: dict | None) -> str:
+        account = account or {}
+        for key in ("account_id", "email"):
+            value = str(account.get(key) or "").strip().lower()
+            if value:
+                return f"{key}:{value}"
+        refresh_token = str(account.get("refresh_token") or "").strip()
+        if refresh_token:
+            return "refresh:" + hashlib.sha256(refresh_token.encode("utf-8")).hexdigest()
+        return "access:" + access_token
+
+    def _get_token_refresh_lock(self, access_token: str, account: dict | None) -> Lock:
+        key = self._token_refresh_lock_key(access_token, account)
+        with self._token_refresh_locks_guard:
+            lock = self._token_refresh_locks.get(key)
+            if lock is None:
+                lock = Lock()
+                self._token_refresh_locks[key] = lock
+            return lock
+
     def _apply_refreshed_tokens(self, old_access_token: str, token_data: dict, event: str) -> str:
         now = datetime.now(timezone.utc).isoformat()
         with self._image_slot_condition:
@@ -437,7 +460,13 @@ class AccountService:
     def refresh_access_token(self, access_token: str, *, force: bool = False, event: str = "refresh_access_token") -> str:
         if not access_token:
             return ""
-        with self._token_refresh_lock:
+        resolved_token, account = self._get_account_for_token(access_token)
+        if not account:
+            return access_token
+        refresh_lock = self._get_token_refresh_lock(resolved_token, account)
+        with refresh_lock:
+            # Another request may have refreshed or rotated this account while
+            # this caller was waiting for its account-specific lock.
             resolved_token, account = self._get_account_for_token(access_token)
             if not account:
                 return access_token
@@ -926,6 +955,7 @@ class AccountService:
             source_type: str | None = None,
             plan_types: set[str] | tuple[str, ...] | None = None,
     ) -> str:
+        deadline = time.monotonic() + config.image_slot_wait_timeout_secs
         with self._image_slot_condition:
             while True:
                 if not self._list_ready_candidate_tokens(excluded_tokens, plan_type, source_type, plan_types):
@@ -939,7 +969,10 @@ class AccountService:
                     self._index += 1
                     self._image_inflight[access_token] = int(self._image_inflight.get(access_token, 0)) + 1
                     return access_token
-                self._image_slot_condition.wait(timeout=1.0)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise RuntimeError("timed out waiting for an image account concurrency slot")
+                self._image_slot_condition.wait(timeout=min(1.0, remaining))
 
     def release_image_slot(self, access_token: str) -> None:
         if not access_token:

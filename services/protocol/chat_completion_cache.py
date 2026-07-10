@@ -123,6 +123,16 @@ class ChatCompletionCache:
     def _copy(value: Any) -> Any:
         return copy.deepcopy(value)
 
+    @staticmethod
+    def _wait_for_inflight(inflight: InflightCall, timeout_seconds: float) -> None:
+        deadline = time.monotonic() + max(1.0, timeout_seconds)
+        with inflight.condition:
+            while not inflight.done:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("timed out waiting for an in-flight cached completion")
+                inflight.condition.wait(timeout=remaining)
+
     def get_or_compute_response(self, key: str, compute: Callable[[], dict[str, Any]]) -> dict[str, Any]:
         settings = self._settings()
         if not settings.get("enabled") or int(settings.get("ttl_seconds") or 0) <= 0:
@@ -145,9 +155,8 @@ class ChatCompletionCache:
                 owner = False
 
         if not owner:
+            self._wait_for_inflight(inflight, float(settings.get("inflight_wait_timeout_seconds") or 300))
             with inflight.condition:
-                while not inflight.done:
-                    inflight.condition.wait()
                 if inflight.error:
                     raise inflight.error
                 return self._copy(inflight.value)
@@ -202,9 +211,8 @@ class ChatCompletionCache:
                 owner = False
 
         if not owner:
+            self._wait_for_inflight(inflight, float(settings.get("inflight_wait_timeout_seconds") or 300))
             with inflight.condition:
-                while not inflight.done:
-                    inflight.condition.wait()
                 if inflight.error:
                     raise inflight.error
                 yield from self._copy(inflight.value)

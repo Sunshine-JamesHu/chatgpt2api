@@ -1,7 +1,9 @@
 import hashlib
 import json
+import os
 import random
 import re
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
@@ -14,6 +16,11 @@ from utils.helper import new_uuid
 
 
 CORES = [8, 16, 24, 32]
+try:
+    POW_MAX_CONCURRENCY = max(1, int(os.getenv("CHATGPT2API_POW_MAX_CONCURRENCY", "4")))
+except ValueError:
+    POW_MAX_CONCURRENCY = 4
+POW_CONCURRENCY_GATE = threading.BoundedSemaphore(POW_MAX_CONCURRENCY)
 DOCUMENT_KEYS = ["__reactContainer$fzelfjyxej8", "_reactListening5dehydibo78", "location"]
 SCREEN_RESOLUTIONS = [[1920, 1080], [1440, 900], [2560, 1440], [3840, 2160]]
 
@@ -201,7 +208,8 @@ def build_proof_token(
     data_build: str = "",
 ) -> str:
     config = build_pow_config(user_agent, script_sources=script_sources, data_build=data_build)
-    answer, solved = _pow_generate(seed, difficulty, config)
+    with POW_CONCURRENCY_GATE:
+        answer, solved = _pow_generate(seed, difficulty, config)
     if not solved:
         raise RuntimeError(f"failed to solve proof token: difficulty={difficulty}")
     return "gAAAAAB" + answer

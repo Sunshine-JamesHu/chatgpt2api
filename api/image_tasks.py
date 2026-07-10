@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from api.image_inputs import parse_image_edit_request, read_image_sources
 from api.support import require_identity, resolve_image_base_url
 from services.content_filter import check_request
+from services.concurrency import ExecutorSaturated, concurrency_runtime
 from services.image_task_service import image_task_service
 from services.log_service import LoggedCall
 
@@ -29,7 +30,9 @@ def _parse_task_ids(value: str) -> list[str]:
 
 async def filter_or_log(call: LoggedCall, text: str, *guard_values: object) -> None:
     try:
-        await run_in_threadpool(check_request, text, *guard_values)
+        await concurrency_runtime.run_ai(check_request, text, *guard_values)
+    except ExecutorSaturated as exc:
+        raise HTTPException(status_code=503, detail={"error": str(exc)}, headers={"Retry-After": "1"}) from exc
     except HTTPException as exc:
         call.log("调用失败", status="failed", error=str(exc.detail))
         raise
@@ -43,7 +46,7 @@ def create_router() -> APIRouter:
         ids: str = Query(default=""),
         authorization: str | None = Header(default=None),
     ):
-        identity = require_identity(authorization)
+        identity = await run_in_threadpool(require_identity, authorization)
         return await run_in_threadpool(image_task_service.list_tasks, identity, _parse_task_ids(ids))
 
     @router.post("/api/image-tasks/generations")
@@ -52,7 +55,7 @@ def create_router() -> APIRouter:
         request: Request,
         authorization: str | None = Header(default=None),
     ):
-        identity = require_identity(authorization)
+        identity = await run_in_threadpool(require_identity, authorization)
         await filter_or_log(LoggedCall(identity, "/api/image-tasks/generations", body.model, "文生图任务", request_text=body.prompt), body.prompt, body.model_dump(mode="python"))
         try:
             return await run_in_threadpool(
@@ -67,13 +70,15 @@ def create_router() -> APIRouter:
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+        except ExecutorSaturated as exc:
+            raise HTTPException(status_code=503, detail={"error": str(exc)}, headers={"Retry-After": "1"}) from exc
 
     @router.post("/api/image-tasks/edits")
     async def create_edit_task(
         request: Request,
         authorization: str | None = Header(default=None),
     ):
-        identity = require_identity(authorization)
+        identity = await run_in_threadpool(require_identity, authorization)
         payload, image_sources, mask_sources = await parse_image_edit_request(request)
         client_task_id = str(payload.get("client_task_id") or "").strip()
         if not client_task_id:
@@ -98,6 +103,8 @@ def create_router() -> APIRouter:
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+        except ExecutorSaturated as exc:
+            raise HTTPException(status_code=503, detail={"error": str(exc)}, headers={"Retry-After": "1"}) from exc
 
     @router.post("/api/image-tasks/{task_id}/resume-poll")
     async def resume_image_poll(
@@ -106,7 +113,7 @@ def create_router() -> APIRouter:
         request: Request,
         authorization: str | None = Header(default=None),
     ):
-        identity = require_identity(authorization)
+        identity = await run_in_threadpool(require_identity, authorization)
         try:
             return await run_in_threadpool(
                 image_task_service.resume_poll,
@@ -116,5 +123,7 @@ def create_router() -> APIRouter:
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+        except ExecutorSaturated as exc:
+            raise HTTPException(status_code=503, detail={"error": str(exc)}, headers={"Retry-After": "1"}) from exc
 
     return router

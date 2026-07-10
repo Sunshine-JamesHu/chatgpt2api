@@ -31,6 +31,14 @@ docker compose up -d
 - API 地址：`http://localhost:3000/v1`
 - 数据目录：`./data`
 
+### Concurrency controls
+
+The service accepts up to 100 active `/v1` requests per process by default. AI work uses a dedicated executor so saturated upstream streams do not consume the Starlette thread pool used by the web UI and control APIs. Requests above the active limit receive `503` with `Retry-After: 1` instead of waiting indefinitely.
+
+The limits can be tuned with `CHATGPT2API_AI_MAX_CONCURRENCY`, `CHATGPT2API_AI_WORKERS`, `CHATGPT2API_IMAGE_TASK_WORKERS`, `CHATGPT2API_IMAGE_TASK_QUEUE`, `CHATGPT2API_EDITABLE_TASK_WORKERS`, `CHATGPT2API_EDITABLE_TASK_QUEUE`, `CHATGPT2API_IMAGE_SUBTASK_WORKERS`, `CHATGPT2API_IMAGE_SUBTASK_QUEUE`, and `CHATGPT2API_POW_MAX_CONCURRENCY`. Runtime usage and rejection counters are available from `/health?format=json` under `concurrency`.
+
+These limits are per process. Do not add Uvicorn workers without moving the in-memory account slots, task state, and completion cache to shared storage.
+
 ### WARP / FlareSolverr 稳定代理部署
 
 如果图片链路经常遇到 Cloudflare 拦截，可以启用附带的 WARP + Privoxy + FlareSolverr 方案：

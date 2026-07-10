@@ -9,6 +9,7 @@ from typing import Any
 from urllib.parse import quote
 
 from services.account_service import account_service
+from services.concurrency import BoundedExecutor, ExecutorSaturated, concurrency_runtime
 from services.config import DATA_DIR
 from services.content_filter import request_text
 from services.log_service import LOG_TYPE_CALL, log_service
@@ -84,8 +85,13 @@ def _public_task(task: dict[str, Any]) -> dict[str, Any]:
 
 
 class EditableFileTaskService:
-    def __init__(self, path: Path = EDITABLE_FILE_TASKS_PATH) -> None:
+    def __init__(
+        self,
+        path: Path = EDITABLE_FILE_TASKS_PATH,
+        executor: BoundedExecutor | None = None,
+    ) -> None:
         self.path = path
+        self.executor = executor or concurrency_runtime.editable_tasks
         self._lock = threading.RLock()
         self._tasks: dict[str, dict[str, Any]] = {}
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -123,7 +129,11 @@ class EditableFileTaskService:
             self._tasks[key] = {"id": task_id, "owner_id": owner, "status": TASK_STATUS_QUEUED, "kind": kind, "model": EDITABLE_FILE_MODEL, "created_at": now, "updated_at": now, "created_ts": ts, "updated_ts": ts}
             task = dict(self._tasks[key])
             self._save_locked()
-        threading.Thread(target=self._run_task, args=(key, kind, prompt, base64_images, dict(identity), base_url), name=f"{kind}-file-task-{task_id[:16]}", daemon=True).start()
+        try:
+            self.executor.submit(self._run_task, key, kind, prompt, base64_images, dict(identity), base_url)
+        except ExecutorSaturated as exc:
+            self._update_task(key, status=TASK_STATUS_ERROR, error=str(exc))
+            raise
         return _public_task(task)
 
     def _run_task(self, key: str, kind: str, prompt: str, base64_images: list[str], identity: dict[str, object], base_url: str) -> None:

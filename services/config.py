@@ -46,6 +46,7 @@ DEFAULT_CHAT_COMPLETION_CACHE = {
     "normalize_messages": True,
     "drop_adjacent_duplicates": True,
     "drop_assistant_history": False,
+    "inflight_wait_timeout_seconds": 300,
 }
 
 DEFAULT_PROXY_RUNTIME_USER_AGENT = (
@@ -194,6 +195,11 @@ def _normalize_chat_completion_cache_settings(value: object) -> dict[str, object
         "drop_assistant_history": _normalize_bool(
             source.get("drop_assistant_history"),
             bool(DEFAULT_CHAT_COMPLETION_CACHE["drop_assistant_history"]),
+        ),
+        "inflight_wait_timeout_seconds": _normalize_positive_int(
+            source.get("inflight_wait_timeout_seconds"),
+            int(DEFAULT_CHAT_COMPLETION_CACHE["inflight_wait_timeout_seconds"]),
+            1,
         ),
     }
 
@@ -423,6 +429,13 @@ class ConfigStore:
             return 3
 
     @property
+    def image_slot_wait_timeout_secs(self) -> float:
+        try:
+            return max(1.0, float(self.data.get("image_slot_wait_timeout_secs", 300)))
+        except (TypeError, ValueError):
+            return 300.0
+
+    @property
     def image_max_account_retries(self) -> int:
         try:
             return min(20, max(0, int(self.data.get("image_max_account_retries", 3))))
@@ -574,6 +587,7 @@ class ConfigStore:
         data["image_poll_interval_secs"] = self.image_poll_interval_secs
         data["image_poll_initial_wait_secs"] = self.image_poll_initial_wait_secs
         data["image_account_concurrency"] = self.image_account_concurrency
+        data["image_slot_wait_timeout_secs"] = self.image_slot_wait_timeout_secs
         data["image_max_account_retries"] = self.image_max_account_retries
         data["image_upstream_model_slug"] = self.image_upstream_model_slug
         data["image_response_include_url"] = self.image_response_include_url

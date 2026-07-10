@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Header, HTTPException, Request
-from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from api.image_inputs import parse_image_edit_request, read_image_sources
 from api.support import require_identity, resolve_image_base_url
 from services.content_filter import check_request, request_shape, request_text
+from services.concurrency import ExecutorSaturated, concurrency_runtime
 from services.editable_file_task_service import editable_file_task_service
 from services.log_service import LoggedCall
 from services.protocol import (
@@ -71,7 +71,7 @@ class EditableFileTaskRequest(BaseModel):
 
 async def filter_or_log(call: LoggedCall, text: str, *guard_values: object) -> None:
     try:
-        await run_in_threadpool(check_request, text, *guard_values)
+        await concurrency_runtime.run_ai(check_request, text, *guard_values)
     except HTTPException as exc:
         call.log("调用失败", status="failed", error=str(exc.detail))
         raise
@@ -82,9 +82,11 @@ def create_router() -> APIRouter:
 
     @router.get("/v1/models")
     async def list_models(authorization: str | None = Header(default=None)):
-        require_identity(authorization)
+        await concurrency_runtime.run_ai(require_identity, authorization)
         try:
-            return await run_in_threadpool(openai_v1_models.list_models)
+            return await concurrency_runtime.run_ai(openai_v1_models.list_models)
+        except ExecutorSaturated:
+            raise
         except Exception as exc:
             raise HTTPException(status_code=502, detail={"error": str(exc)}) from exc
 
@@ -94,7 +96,7 @@ def create_router() -> APIRouter:
             request: Request,
             authorization: str | None = Header(default=None),
     ):
-        identity = require_identity(authorization)
+        identity = await concurrency_runtime.run_ai(require_identity, authorization)
         payload = body.model_dump(mode="python")
         payload["base_url"] = resolve_image_base_url(request)
         call = LoggedCall(identity, "/v1/images/generations", body.model, "文生图", request_text=body.prompt)
@@ -106,7 +108,7 @@ def create_router() -> APIRouter:
             request: Request,
             authorization: str | None = Header(default=None),
     ):
-        identity = require_identity(authorization)
+        identity = await concurrency_runtime.run_ai(require_identity, authorization)
         payload, image_sources, mask_sources = await parse_image_edit_request(request)
         prompt = str(payload["prompt"])
         model = str(payload["model"])
@@ -120,7 +122,7 @@ def create_router() -> APIRouter:
 
     @router.post("/v1/chat/completions")
     async def create_chat_completion(body: ChatCompletionRequest, authorization: str | None = Header(default=None)):
-        identity = require_identity(authorization)
+        identity = await concurrency_runtime.run_ai(require_identity, authorization)
         payload = body.model_dump(mode="python")
         model = str(payload.get("model") or "auto")
         request_preview = request_text(payload.get("prompt"), payload.get("messages"))
@@ -137,7 +139,7 @@ def create_router() -> APIRouter:
 
     @router.post("/v1/responses")
     async def create_response(body: ResponseCreateRequest, authorization: str | None = Header(default=None)):
-        identity = require_identity(authorization)
+        identity = await concurrency_runtime.run_ai(require_identity, authorization)
         payload = body.model_dump(mode="python")
         model = str(payload.get("model") or "auto")
         request_preview = request_text(payload.get("input"), payload.get("instructions"))
@@ -159,7 +161,10 @@ def create_router() -> APIRouter:
             x_api_key: str | None = Header(default=None, alias="x-api-key"),
             anthropic_version: str | None = Header(default=None, alias="anthropic-version"),
     ):
-        identity = require_identity(authorization or (f"Bearer {x_api_key}" if x_api_key else None))
+        identity = await concurrency_runtime.run_ai(
+            require_identity,
+            authorization or (f"Bearer {x_api_key}" if x_api_key else None),
+        )
         payload = body.model_dump(mode="python")
         model = str(payload.get("model") or "auto")
         request_preview = request_text(payload.get("system"), payload.get("messages"), payload.get("tools"))
@@ -169,57 +174,63 @@ def create_router() -> APIRouter:
 
     @router.post("/v1/search")
     async def search(body: SearchRequest, authorization: str | None = Header(default=None)):
-        identity = require_identity(authorization)
+        identity = await concurrency_runtime.run_ai(require_identity, authorization)
         call = LoggedCall(identity, "/v1/search", openai_search.MODEL, "搜索", request_text=body.prompt)
         await filter_or_log(call, body.prompt)
         return await call.run(openai_search.handle, body.model_dump(mode="python"))
 
     @router.get("/v1/editable-file-tasks")
     async def list_editable_file_tasks(ids: str = "", authorization: str | None = Header(default=None)):
-        identity = require_identity(authorization)
+        identity = await concurrency_runtime.run_ai(require_identity, authorization)
         task_ids = [item.strip() for item in ids.split(",") if item.strip()]
-        return await run_in_threadpool(editable_file_task_service.list_tasks, identity, task_ids)
+        return await concurrency_runtime.run_ai(editable_file_task_service.list_tasks, identity, task_ids)
 
     @router.get("/files/{file_path:path}")
     async def download_editable_file(file_path: str):
         try:
-            path = await run_in_threadpool(editable_file_task_service.public_file_path, file_path)
+            path = await concurrency_runtime.run_ai(editable_file_task_service.public_file_path, file_path)
         except Exception as exc:
             raise HTTPException(status_code=404, detail={"error": "file not found"}) from exc
         return FileResponse(path, filename=path.name)
 
     @router.post("/v1/ppt/generations")
     async def create_ppt_task(body: EditableFileTaskRequest, request: Request, authorization: str | None = Header(default=None)):
-        identity = require_identity(authorization)
+        identity = await concurrency_runtime.run_ai(require_identity, authorization)
         await filter_or_log(
             LoggedCall(identity, "/v1/ppt/generations", "gpt-5-5-thinking", "PPT生成任务", request_text=body.prompt),
             body.prompt,
             [{"image_base64": image} for image in body.base64_images],
         )
-        return await run_in_threadpool(
-            editable_file_task_service.submit_ppt,
-            identity,
-            client_task_id=body.client_task_id or "",
-            prompt=body.prompt,
-            base64_images=body.base64_images,
-            base_url=resolve_image_base_url(request),
-        )
+        try:
+            return await concurrency_runtime.run_ai(
+                editable_file_task_service.submit_ppt,
+                identity,
+                client_task_id=body.client_task_id or "",
+                prompt=body.prompt,
+                base64_images=body.base64_images,
+                base_url=resolve_image_base_url(request),
+            )
+        except ExecutorSaturated as exc:
+            raise HTTPException(status_code=503, detail={"error": str(exc)}, headers={"Retry-After": "1"}) from exc
 
     @router.post("/v1/psd/generations")
     async def create_psd_task(body: EditableFileTaskRequest, request: Request, authorization: str | None = Header(default=None)):
-        identity = require_identity(authorization)
+        identity = await concurrency_runtime.run_ai(require_identity, authorization)
         await filter_or_log(
             LoggedCall(identity, "/v1/psd/generations", "gpt-5-5-thinking", "PSD生成任务", request_text=body.prompt),
             body.prompt,
             [{"image_base64": image} for image in body.base64_images],
         )
-        return await run_in_threadpool(
-            editable_file_task_service.submit_psd,
-            identity,
-            client_task_id=body.client_task_id or "",
-            prompt=body.prompt,
-            base64_images=body.base64_images,
-            base_url=resolve_image_base_url(request),
-        )
+        try:
+            return await concurrency_runtime.run_ai(
+                editable_file_task_service.submit_psd,
+                identity,
+                client_task_id=body.client_task_id or "",
+                prompt=body.prompt,
+                base64_images=body.base64_images,
+                base_url=resolve_image_base_url(request),
+            )
+        except ExecutorSaturated as exc:
+            raise HTTPException(status_code=503, detail={"error": str(exc)}, headers={"Retry-After": "1"}) from exc
 
     return router

@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from services.concurrency import BoundedExecutor, ExecutorSaturated, concurrency_runtime
 from services.config import DATA_DIR, config
 from services.content_filter import request_text
 from services.log_service import LOG_TYPE_CALL, log_service
@@ -104,11 +105,13 @@ class ImageTaskService:
         generation_handler: Callable[[dict[str, Any]], dict[str, Any]] = openai_v1_image_generations.handle,
         edit_handler: Callable[[dict[str, Any]], dict[str, Any]] = openai_v1_image_edit.handle,
         retention_days_getter: Callable[[], int] | None = None,
+        executor: BoundedExecutor | None = None,
     ):
         self.path = path
         self.generation_handler = generation_handler
         self.edit_handler = edit_handler
         self.retention_days_getter = retention_days_getter or (lambda: config.image_retention_days)
+        self.executor = executor or concurrency_runtime.image_tasks
         self._lock = threading.RLock()
         self._tasks: dict[str, dict[str, Any]] = {}
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -230,13 +233,18 @@ class ImageTaskService:
             should_start = True
 
         if should_start:
-            thread = threading.Thread(
-                target=self._run_task,
-                args=(key, mode, payload, dict(identity), _clean(payload.get("model"), "gpt-image-2")),
-                name=f"image-task-{task_id[:16]}",
-                daemon=True,
-            )
-            thread.start()
+            try:
+                self.executor.submit(
+                    self._run_task,
+                    key,
+                    mode,
+                    payload,
+                    dict(identity),
+                    _clean(payload.get("model"), "gpt-image-2"),
+                )
+            except ExecutorSaturated as exc:
+                self._update_task(key, status=TASK_STATUS_ERROR, error=str(exc), data=[])
+                raise
         return _public_task(task)
 
     def _run_task(
@@ -462,13 +470,19 @@ class ImageTaskService:
             self._update_task(key, status=TASK_STATUS_RUNNING, error="")
 
         # 启动新线程继续轮询
-        thread = threading.Thread(
-            target=self._run_resume_poll,
-            args=(key, conversation_id, extra_timeout_secs, dict(identity), mode, model),
-            name=f"image-resume-{_clean(task_id)[:16]}",
-            daemon=True,
-        )
-        thread.start()
+        try:
+            self.executor.submit(
+                self._run_resume_poll,
+                key,
+                conversation_id,
+                extra_timeout_secs,
+                dict(identity),
+                mode,
+                model,
+            )
+        except ExecutorSaturated as exc:
+            self._update_task(key, status=TASK_STATUS_ERROR, error=str(exc), data=[])
+            raise
         return _public_task(task)
 
     def _run_resume_poll(

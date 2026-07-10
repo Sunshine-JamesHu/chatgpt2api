@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict
 
 from api.support import require_admin, require_identity, resolve_image_base_url
 from services.backup_service import BackupError, backup_service
+from services.concurrency import concurrency_runtime
 from services.config import config
 from services.image_service import (
     compress_images,
@@ -63,7 +64,7 @@ def create_router(app_version: str) -> APIRouter:
 
     @router.post("/auth/login")
     async def login(authorization: str | None = Header(default=None)):
-        identity = require_identity(authorization)
+        identity = await run_in_threadpool(require_identity, authorization)
         return {
             "ok": True,
             "version": app_version,
@@ -97,7 +98,12 @@ def create_router(app_version: str) -> APIRouter:
     @router.get("/api/images")
     async def get_images(request: Request, start_date: str = "", end_date: str = "", authorization: str | None = Header(default=None)):
         require_admin(authorization)
-        return list_images(resolve_image_base_url(request), start_date=start_date.strip(), end_date=end_date.strip())
+        return await run_in_threadpool(
+            list_images,
+            resolve_image_base_url(request),
+            start_date=start_date.strip(),
+            end_date=end_date.strip(),
+        )
 
     @router.get("/images/{image_path:path}", include_in_schema=False)
     async def get_image(image_path: str):
@@ -130,12 +136,18 @@ def create_router(app_version: str) -> APIRouter:
     @router.get("/api/logs")
     async def get_logs(type: str = "", start_date: str = "", end_date: str = "", authorization: str | None = Header(default=None)):
         require_admin(authorization)
-        return {"items": log_service.list(type=type.strip(), start_date=start_date.strip(), end_date=end_date.strip())}
+        items = await run_in_threadpool(
+            log_service.list,
+            type=type.strip(),
+            start_date=start_date.strip(),
+            end_date=end_date.strip(),
+        )
+        return {"items": items}
 
     @router.post("/api/logs/delete")
     async def delete_logs(body: LogDeleteRequest, authorization: str | None = Header(default=None)):
         require_admin(authorization)
-        return log_service.delete(body.ids)
+        return await run_in_threadpool(log_service.delete, body.ids)
 
     @router.post("/api/proxy/test")
     async def test_proxy_endpoint(body: ProxyTestRequest, authorization: str | None = Header(default=None)):
@@ -296,9 +308,9 @@ def create_router(app_version: str) -> APIRouter:
     @router.get("/health", response_model=None)
     async def health_dashboard(format: str = Query(default="html")):
         from services.account_service import account_service as acct_svc
-        stats = acct_svc.get_stats()
+        stats = await run_in_threadpool(acct_svc.get_stats)
         storage = config.get_storage_backend()
-        storage_health = storage.health_check()
+        storage_health = await run_in_threadpool(storage.health_check)
         healthy = stats["active"] > 0
 
         stats_json = {
@@ -308,6 +320,7 @@ def create_router(app_version: str) -> APIRouter:
             "storage": {"backend": storage.get_backend_info(), "health": storage_health},
             "proxy_runtime": proxy_settings.get_runtime_status(),
             "accounts": stats,
+            "concurrency": concurrency_runtime.snapshot(),
         }
         if format == "json":
             return stats_json

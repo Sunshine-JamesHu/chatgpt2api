@@ -5,13 +5,14 @@ import json
 import re
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Iterator
 
 import tiktoken
 
 from services.account_service import account_service
+from services.concurrency import ExecutorSaturated, concurrency_runtime
 from services.config import config
 from services.image_storage_service import image_storage_service
 from services.openai_backend_api import ImageContentPolicyError, ImagePollTimeoutError, OpenAIBackendAPI
@@ -1548,8 +1549,9 @@ def _generate_single_image(
             _attach_retry_info(error)
             raise error from exc
         finally:
-            if backend is not None:
-                backend.close()
+            close_backend = getattr(backend, "close", None)
+            if callable(close_backend):
+                close_backend()
 
 
 def stream_image_outputs_with_pool(request: ConversationRequest) -> Iterator[ImageOutput]:
@@ -1586,9 +1588,9 @@ def stream_image_outputs_with_pool(request: ConversationRequest) -> Iterator[Ima
     futures = {}
     results: dict[int, list[ImageOutput]] = {}
     errors: dict[int, Exception] = {}
-    with ThreadPoolExecutor(max_workers=request.n) as executor:
+    try:
         for index in range(1, request.n + 1):
-            future = executor.submit(_generate_single_image, request, index, request.n)
+            future = concurrency_runtime.image_subtasks.submit(_generate_single_image, request, index, request.n)
             futures[future] = index
 
         # 按完成顺序收集结果
@@ -1603,6 +1605,10 @@ def stream_image_outputs_with_pool(request: ConversationRequest) -> Iterator[Ima
                     "index": index,
                     "error": str(exc)[:300],
                 })
+    except ExecutorSaturated as exc:
+        for future in futures:
+            future.cancel()
+        raise ImageGenerationError("image generation queue is full, please retry later") from exc
 
     # yield 结果：跳过索引顺序限制，不再让低索引失败阻塞高索引成功结果
     emitted = False

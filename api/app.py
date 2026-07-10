@@ -11,6 +11,7 @@ from api import accounts, ai, image_tasks, system
 from api.errors import install_exception_handlers
 from api.support import resolve_web_asset, start_limited_account_watcher
 from services.backup_service import backup_service
+from services.concurrency import AIConcurrencyMiddleware
 from services.config import config
 from services.image_service import start_image_cleanup_scheduler
 
@@ -35,6 +36,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="chatgpt2api", version=app_version, lifespan=lifespan)
     install_exception_handlers(app)
+    app.add_middleware(AIConcurrencyMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],

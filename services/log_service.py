@@ -11,12 +11,12 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import HTTPException
-from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from services.concurrency import ConcurrencyRuntime, ExecutorSaturated, concurrency_runtime
 from services.config import DATA_DIR, config
 from services.protocol.error_response import anthropic_error_response, openai_error_response
-from utils.helper import anthropic_sse_stream, sse_json_stream
+from utils.helper import async_anthropic_sse_stream, async_sse_json_stream
 
 LOG_TYPE_CALL = "call"
 LOG_TYPE_ACCOUNT = "account"
@@ -262,13 +262,6 @@ def _protocol_error_response(exc: Exception, status_code: int, sse: str) -> JSON
     return openai_error_response(message, status_code)
 
 
-def _next_item(items):
-    try:
-        return True, next(items)
-    except StopIteration:
-        return False, None
-
-
 @dataclass
 class LoggedCall:
     identity: dict[str, object]
@@ -278,18 +271,21 @@ class LoggedCall:
     started: float = field(default_factory=time.time)
     request_text: str = ""
     request_shape: dict[str, int] | None = None
+    runtime: ConcurrencyRuntime = field(default=concurrency_runtime, repr=False)
 
     async def run(self, handler, *args, sse: str = "openai"):
         from services.protocol.conversation import ImageGenerationError
 
         try:
-            result = await run_in_threadpool(handler, *args)
+            result = await self.runtime.run_ai(handler, *args)
         except ImageGenerationError as exc:
             self.log("调用失败", result=exc, status="failed", error=str(exc), account_email=getattr(exc, "account_email", ""),
                      conversation_id=getattr(exc, "conversation_id", ""))
             return _image_error_response(exc)
         except HTTPException as exc:
             self.log("调用失败", status="failed", error=str(exc.detail))
+            raise
+        except ExecutorSaturated:
             raise
         except Exception as exc:
             self.log("调用失败", status="failed", error=str(exc), account_email=getattr(exc, "account_email", ""))
@@ -302,15 +298,17 @@ class LoggedCall:
             response = _strip_internal_response_fields(dict(result), _response_hidden_keys(self.endpoint))
             return response
 
-        sender = anthropic_sse_stream if sse == "anthropic" else sse_json_stream
+        sender = async_anthropic_sse_stream if sse == "anthropic" else async_sse_json_stream
         try:
-            has_first, first = await run_in_threadpool(_next_item, result)
+            has_first, first = await self.runtime.next_ai(result)
         except ImageGenerationError as exc:
             self.log("调用失败", result=exc, status="failed", error=str(exc), account_email=getattr(exc, "account_email", ""),
                      conversation_id=getattr(exc, "conversation_id", ""))
             return _image_error_response(exc)
         except HTTPException as exc:
             self.log("调用失败", status="failed", error=str(exc.detail))
+            raise
+        except ExecutorSaturated:
             raise
         except Exception as exc:
             self.log("调用失败", status="failed", error=str(exc), account_email=getattr(exc, "account_email", ""))
@@ -319,8 +317,9 @@ class LoggedCall:
             return _protocol_error_response(exc, 502, sse)
         if not has_first:
             self.log("流式调用结束")
-            return StreamingResponse(sender(()), media_type="text/event-stream")
-        return StreamingResponse(sender(self.stream(itertools.chain([first], result))), media_type="text/event-stream")
+            return StreamingResponse(sender(self.runtime.iterate_ai(iter(()))), media_type="text/event-stream")
+        items = self.stream(itertools.chain([first], result))
+        return StreamingResponse(sender(self.runtime.iterate_ai(items)), media_type="text/event-stream")
 
     def stream(self, items):
         urls: list[str] = []

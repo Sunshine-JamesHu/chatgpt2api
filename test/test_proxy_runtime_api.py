@@ -174,6 +174,8 @@ class ProxyRuntimeApiTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["version"], "9.9.9-test")
         self.assertEqual(payload["proxy_runtime"]["clearance_mode"], "flaresolverr")
+        self.assertEqual(payload["concurrency"]["ai"]["limit"], 100)
+        self.assertIn("image_tasks", payload["concurrency"]["executors"])
 
 
 if __name__ == "__main__":

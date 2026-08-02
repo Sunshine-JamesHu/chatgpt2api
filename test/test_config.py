@@ -109,53 +109,83 @@ class ConfigLoadingTests(unittest.TestCase):
 
 
 class ImageModelSlugConfigTests(unittest.TestCase):
-    def test_image_model_slug_uses_default_when_config_empty(self) -> None:
+    def test_image_model_settings_uses_new_default_when_config_empty(self) -> None:
         from services.config import config
         from services.openai_backend_api import OpenAIBackendAPI
 
-        original_value = config.data.get("image_upstream_model_slug")
+        original_model = config.data.get("default_upstream_model_name")
+        original_effort = config.data.get("default_thinking_effort")
+        original_legacy_model = config.data.get("image_upstream_model_slug")
         try:
+            config.data["default_upstream_model_name"] = ""
+            config.data["default_thinking_effort"] = "auto"
             config.data["image_upstream_model_slug"] = ""
             backend = object.__new__(OpenAIBackendAPI)
 
-            self.assertEqual(backend._image_model_slug("gpt-image-2"), "gpt-5-4")
+            self.assertEqual(backend._image_model_settings("gpt-image-2"), ("gpt-5-5", ""))
         finally:
-            if original_value is None:
+            if original_model is None:
+                config.data.pop("default_upstream_model_name", None)
+            else:
+                config.data["default_upstream_model_name"] = original_model
+            if original_effort is None:
+                config.data.pop("default_thinking_effort", None)
+            else:
+                config.data["default_thinking_effort"] = original_effort
+            if original_legacy_model is None:
                 config.data.pop("image_upstream_model_slug", None)
             else:
-                config.data["image_upstream_model_slug"] = original_value
+                config.data["image_upstream_model_slug"] = original_legacy_model
 
-    def test_image_model_slug_uses_configured_upstream_model(self) -> None:
+    def test_image_model_settings_uses_legacy_configured_upstream_model(self) -> None:
         from services.config import config
         from services.openai_backend_api import OpenAIBackendAPI
 
-        original_value = config.data.get("image_upstream_model_slug")
+        original_model = config.data.get("default_upstream_model_name")
+        original_effort = config.data.get("default_thinking_effort")
+        original_legacy_model = config.data.get("image_upstream_model_slug")
         try:
+            config.data["default_upstream_model_name"] = ""
+            config.data["default_thinking_effort"] = "auto"
             config.data["image_upstream_model_slug"] = "gpt-5-5-thinking"
             backend = object.__new__(OpenAIBackendAPI)
 
-            self.assertEqual(backend._image_model_slug("gpt-image-2"), "gpt-5-5-thinking")
+            self.assertEqual(backend._image_model_settings("gpt-image-2"), ("gpt-5-5-thinking", ""))
         finally:
-            if original_value is None:
+            if original_model is None:
+                config.data.pop("default_upstream_model_name", None)
+            else:
+                config.data["default_upstream_model_name"] = original_model
+            if original_effort is None:
+                config.data.pop("default_thinking_effort", None)
+            else:
+                config.data["default_thinking_effort"] = original_effort
+            if original_legacy_model is None:
                 config.data.pop("image_upstream_model_slug", None)
             else:
-                config.data["image_upstream_model_slug"] = original_value
+                config.data["image_upstream_model_slug"] = original_legacy_model
 
-    def test_image_model_slug_does_not_override_codex_model(self) -> None:
+    def test_image_model_settings_does_not_override_codex_model(self) -> None:
         from services.config import config
         from services.openai_backend_api import CODEX_IMAGE_MODEL, OpenAIBackendAPI
 
-        original_value = config.data.get("image_upstream_model_slug")
+        original_model = config.data.get("default_upstream_model_name")
+        original_effort = config.data.get("default_thinking_effort")
         try:
-            config.data["image_upstream_model_slug"] = "gpt-5-5-thinking"
+            config.data["default_upstream_model_name"] = "gpt-5-5-max"
+            config.data["default_thinking_effort"] = "standard"
             backend = object.__new__(OpenAIBackendAPI)
 
-            self.assertEqual(backend._image_model_slug(CODEX_IMAGE_MODEL), CODEX_IMAGE_MODEL)
+            self.assertEqual(backend._image_model_settings(CODEX_IMAGE_MODEL), (CODEX_IMAGE_MODEL, "standard"))
         finally:
-            if original_value is None:
-                config.data.pop("image_upstream_model_slug", None)
+            if original_model is None:
+                config.data.pop("default_upstream_model_name", None)
             else:
-                config.data["image_upstream_model_slug"] = original_value
+                config.data["default_upstream_model_name"] = original_model
+            if original_effort is None:
+                config.data.pop("default_thinking_effort", None)
+            else:
+                config.data["default_thinking_effort"] = original_effort
 
 
 if __name__ == "__main__":

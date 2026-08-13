@@ -37,6 +37,15 @@ export type Account = {
   image_inflight?: number;
   last_used_at?: string | null;
   proxy?: string | null;
+  proxy_id?: string | null;
+};
+
+export type ProxyPoolItem = {
+  id: string;
+  name: string;
+  url: string;
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 
 export type AccountImportPayload = {
@@ -348,10 +357,10 @@ export async function fetchModels() {
   return httpRequest<ModelListResponse>("/v1/models");
 }
 
-export async function createAccounts(tokens: string[], accounts: AccountImportPayload[] = []) {
+export async function createAccounts(tokens: string[], accounts: AccountImportPayload[] = [], proxyId?: string | null) {
   return httpRequest<AccountMutationResponse>("/api/accounts", {
     method: "POST",
-    body: { tokens, accounts },
+    body: { tokens, accounts, proxy_id: proxyId ?? "" },
   });
 }
 
@@ -362,10 +371,10 @@ export type OAuthLoginStartResponse = {
   redirect_uri_prefix: string;
 };
 
-export async function startOAuthLogin(emailHint?: string) {
+export async function startOAuthLogin(emailHint?: string, proxyId?: string | null) {
   return httpRequest<OAuthLoginStartResponse>("/api/accounts/oauth/start", {
     method: "POST",
-    body: { email_hint: emailHint ?? "" },
+    body: { email_hint: emailHint ?? "", proxy_id: proxyId ?? "" },
   });
 }
 
@@ -411,7 +420,7 @@ export async function updateAccount(
     type?: AccountType;
     status?: AccountStatus;
     quota?: number;
-    proxy?: string;
+    proxy_id?: string | null;
   },
 ) {
   return httpRequest<AccountUpdateResponse>("/api/accounts/update", {
@@ -914,6 +923,26 @@ export async function testProxy(url?: string) {
     method: "POST",
     body: { url: url ?? "" },
   });
+}
+
+export async function fetchProxyPool() {
+  return httpRequest<{ items: ProxyPoolItem[] }>("/api/proxy-pool");
+}
+
+export async function createProxyPoolItem(input: { name: string; url: string }) {
+  return httpRequest<{ item: ProxyPoolItem; items: ProxyPoolItem[] }>("/api/proxy-pool", { method: "POST", body: input });
+}
+
+export async function updateProxyPoolItem(id: string, input: { name: string; url: string }) {
+  return httpRequest<{ item: ProxyPoolItem; items: ProxyPoolItem[] }>(`/api/proxy-pool/${id}`, { method: "POST", body: input });
+}
+
+export async function deleteProxyPoolItem(id: string) {
+  return httpRequest<{ items: ProxyPoolItem[] }>(`/api/proxy-pool/${id}`, { method: "DELETE" });
+}
+
+export async function testProxyPoolItem(id: string) {
+  return httpRequest<{ result: ProxyTestResult }>(`/api/proxy-pool/${id}/test`, { method: "POST" });
 }
 
 export async function fetchProxyRuntime() {

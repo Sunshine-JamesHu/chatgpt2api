@@ -26,6 +26,7 @@ from api.support import (
 from services.account_service import account_service
 from services.cpa_service import cpa_config, cpa_import_service, list_remote_files
 from services.oauth_login_service import OAuthLoginError, oauth_login_service
+from services.proxy_pool_service import ProxyPoolError, proxy_pool_service
 from services.sub2api_service import (
     list_remote_accounts as sub2api_list_remote_accounts,
     list_remote_groups as sub2api_list_remote_groups,
@@ -48,6 +49,7 @@ class UserKeyUpdateRequest(BaseModel):
 class AccountCreateRequest(BaseModel):
     tokens: list[str] = Field(default_factory=list)
     accounts: list[dict[str, Any]] = Field(default_factory=list)
+    proxy_id: str | None = None
 
 
 class AccountDeleteRequest(BaseModel):
@@ -68,7 +70,7 @@ class AccountUpdateRequest(BaseModel):
     type: str | None = None
     status: str | None = None
     quota: int | None = None
-    proxy: str | None = None
+    proxy_id: str | None = None
 
 
 class CPAPoolCreateRequest(BaseModel):
@@ -112,6 +114,7 @@ class Sub2APIImportRequest(BaseModel):
 class OAuthLoginStartRequest(BaseModel):
     """起始 OAuth 桥。email_hint 可选，仅用于让 OpenAI 登录页预填邮箱。"""
     email_hint: str = ""
+    proxy_id: str | None = None
 
 
 class OAuthLoginFinishRequest(BaseModel):
@@ -215,21 +218,28 @@ def create_router() -> APIRouter:
     @router.post("/api/accounts")
     async def create_accounts(body: AccountCreateRequest, authorization: str | None = Header(default=None)):
         require_admin(authorization)
+        proxy_id = str(body.proxy_id or "").strip()
+        if proxy_id:
+            try:
+                await run_in_threadpool(proxy_pool_service.get_url, proxy_id)
+            except ProxyPoolError as exc:
+                raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
         account_payloads = [item for item in body.accounts if isinstance(item, dict)]
         payload_tokens = [_account_payload_token(item) for item in account_payloads]
         tokens = _unique_tokens([*body.tokens, *payload_tokens])
         if not tokens:
             raise HTTPException(status_code=400, detail={"error": "tokens is required"})
+        account_payloads = [{**item, "proxy_id": proxy_id, "proxy": ""} for item in account_payloads]
         if account_payloads:
             result = account_service.add_account_items(account_payloads)
             payload_token_set = set(_unique_tokens(payload_tokens))
             extra_tokens = [token for token in tokens if token not in payload_token_set]
             if extra_tokens:
-                extra_result = account_service.add_accounts(extra_tokens)
+                extra_result = account_service.add_account_items([{"access_token": token, "proxy_id": proxy_id, "proxy": ""} for token in extra_tokens])
                 result["added"] = int(result.get("added") or 0) + int(extra_result.get("added") or 0)
                 result["skipped"] = int(result.get("skipped") or 0) + int(extra_result.get("skipped") or 0)
         else:
-            result = account_service.add_accounts(tokens)
+            result = account_service.add_account_items([{"access_token": token, "proxy_id": proxy_id, "proxy": ""} for token in tokens])
         refresh_result = account_service.refresh_accounts(tokens)
         return {
             **result,
@@ -336,7 +346,14 @@ def create_router() -> APIRouter:
         access_token = str(body.access_token or "").strip()
         if not access_token:
             raise HTTPException(status_code=400, detail={"error": "access_token is required"})
-        updates = {key: value for key, value in {"type": body.type, "status": body.status, "quota": body.quota, "proxy": body.proxy}.items() if value is not None}
+        if body.proxy_id:
+            try:
+                await run_in_threadpool(proxy_pool_service.get_url, body.proxy_id)
+            except ProxyPoolError as exc:
+                raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+        updates = {key: value for key, value in {"type": body.type, "status": body.status, "quota": body.quota, "proxy_id": body.proxy_id}.items() if value is not None}
+        if body.proxy_id is not None:
+            updates["proxy"] = ""
         if not updates:
             raise HTTPException(status_code=400, detail={"error": "还没有检测到改动，请修改后再保存"})
         account = account_service.update_account(access_token, updates)
@@ -352,7 +369,7 @@ def create_router() -> APIRouter:
         """登记一次 PKCE 会话，返回可让用户浏览器打开的 authorize URL。"""
         require_admin(authorization)
         try:
-            return await run_in_threadpool(oauth_login_service.start, body.email_hint)
+            return await run_in_threadpool(oauth_login_service.start, body.email_hint, body.proxy_id)
         except OAuthLoginError as exc:
             raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
 
@@ -381,6 +398,7 @@ def create_router() -> APIRouter:
             "refresh_token": tokens["refresh_token"],
             "id_token": tokens["id_token"],
             "source_type": "oauth_login",
+            "proxy_id": tokens.get("proxy_id"),
         }
         add_result = await run_in_threadpool(account_service.add_account_items, [payload])
         refresh_result = await run_in_threadpool(

@@ -26,6 +26,8 @@ from services.image_storage_service import ImageStorageError, image_storage_serv
 from services.image_tags_service import delete_tag, get_all_tags, set_tags
 from services.log_service import log_service
 from services.proxy_service import proxy_settings, test_clearance, test_proxy
+from services.proxy_pool_service import ProxyPoolError, proxy_pool_service
+from services.account_service import account_service
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -33,6 +35,11 @@ class SettingsUpdateRequest(BaseModel):
 
 
 class ProxyTestRequest(BaseModel):
+    url: str = ""
+
+
+class ProxyPoolCreateRequest(BaseModel):
+    name: str = ""
     url: str = ""
 
 
@@ -153,6 +160,49 @@ def create_router(app_version: str) -> APIRouter:
     async def test_proxy_endpoint(body: ProxyTestRequest, authorization: str | None = Header(default=None)):
         require_admin(authorization)
         return {"result": await run_in_threadpool(test_proxy, (body.url or "").strip())}
+
+    @router.get("/api/proxy-pool")
+    async def list_proxy_pool(authorization: str | None = Header(default=None)):
+        require_admin(authorization)
+        items = await run_in_threadpool(proxy_pool_service.list)
+        return {"items": items}
+
+    @router.post("/api/proxy-pool")
+    async def create_proxy_pool_item(body: ProxyPoolCreateRequest, authorization: str | None = Header(default=None)):
+        require_admin(authorization)
+        try:
+            item = await run_in_threadpool(proxy_pool_service.create, body.name, body.url)
+        except ProxyPoolError as exc:
+            raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+        return {"item": item, "items": await run_in_threadpool(proxy_pool_service.list)}
+
+    @router.post("/api/proxy-pool/{proxy_id}")
+    async def update_proxy_pool_item(proxy_id: str, body: ProxyPoolCreateRequest, authorization: str | None = Header(default=None)):
+        require_admin(authorization)
+        try:
+            item = await run_in_threadpool(proxy_pool_service.update, proxy_id, body.name, body.url)
+        except ProxyPoolError as exc:
+            raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+        return {"item": item, "items": await run_in_threadpool(proxy_pool_service.list)}
+
+    @router.delete("/api/proxy-pool/{proxy_id}")
+    async def delete_proxy_pool_item(proxy_id: str, authorization: str | None = Header(default=None)):
+        require_admin(authorization)
+        references = await run_in_threadpool(account_service.count_proxy_references, proxy_id)
+        try:
+            await run_in_threadpool(proxy_pool_service.delete, proxy_id, references)
+        except ProxyPoolError as exc:
+            raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+        return {"items": await run_in_threadpool(proxy_pool_service.list)}
+
+    @router.post("/api/proxy-pool/{proxy_id}/test")
+    async def test_proxy_pool_item(proxy_id: str, authorization: str | None = Header(default=None)):
+        require_admin(authorization)
+        try:
+            url = await run_in_threadpool(proxy_pool_service.get_url, proxy_id)
+        except ProxyPoolError as exc:
+            raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+        return {"result": await run_in_threadpool(test_proxy, url)}
 
     @router.get("/api/proxy/runtime")
     async def get_proxy_runtime_endpoint(authorization: str | None = Header(default=None)):

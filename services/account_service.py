@@ -223,6 +223,7 @@ class AccountService:
         normalized["email"] = normalized.get("email") or None
         normalized["user_id"] = normalized.get("user_id") or None
         normalized["proxy"] = str(normalized.get("proxy") or "").strip()
+        normalized["proxy_id"] = str(normalized.get("proxy_id") or "").strip() or None
         source_type = normalized.get("source_type")
         if not source_type and str(normalized.get("export_type") or "").strip().lower() == "codex":
             source_type = "codex"
@@ -502,7 +503,10 @@ class AccountService:
     def _password_re_login_thread(self, access_token: str, email: str, password: str, event: str, progress_id: str | None = None) -> None:
         """密码重新登录线程入口"""
         try:
-            result = self._login_with_password(email, password)
+            # Password re-login makes several upstream OAuth requests. Resolve the
+            # original account here so its bound proxy applies to the whole flow.
+            account = self.get_account(access_token) or {}
+            result = self._login_with_password(email, password, account)
             if result.get("ok"):
                 # 登录成功，更新账号
                 new_access_token = result.get("access_token", "")
@@ -611,7 +615,7 @@ class AccountService:
             if progress_id:
                 self.update_relogin_progress(progress_id, access_token, "异常", str(exc))
 
-    def _login_with_password(self, email: str, password: str) -> dict:
+    def _login_with_password(self, email: str, password: str, account: dict | None = None) -> dict:
         """通过邮箱+密码登录，返回 {access_token, refresh_token, id_token, ...}"""
         from curl_cffi import requests
         
@@ -624,11 +628,14 @@ class AccountService:
         user_agent = self._OAUTH_USER_AGENT
         
         # 创建 session
-        session_kwargs = {"impersonate": "chrome110", "verify": False}
-        proxy = config.get_proxy_settings()
-        if proxy:
-            session_kwargs["proxy"] = proxy
-        session = requests.Session(**session_kwargs)
+        from services.proxy_service import proxy_settings
+
+        session = requests.Session(**proxy_settings.build_session_kwargs(
+            account=account,
+            upstream=True,
+            impersonate="chrome110",
+            verify=False,
+        ))
         
         try:
             device_id = str(uuid.uuid4())
@@ -1270,6 +1277,13 @@ class AccountService:
                                 {"token": anonymize_token(access_token), "status": account.get("status")})
             return dict(account)
         return None
+
+    def count_proxy_references(self, proxy_id: str) -> int:
+        wanted = str(proxy_id or "").strip()
+        if not wanted:
+            return 0
+        with self._lock:
+            return sum(str(account.get("proxy_id") or "") == wanted for account in self._accounts.values())
 
     def _record_refresh_success(self, access_token: str) -> None:
         with self._lock:

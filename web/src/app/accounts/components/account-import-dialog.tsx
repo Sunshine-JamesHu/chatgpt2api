@@ -1,8 +1,9 @@
 "use client";
 
-import { useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import {
   ArrowLeft,
+  Copy,
   ExternalLink,
   FileText,
   Files,
@@ -24,13 +25,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { ProxyPoolSelect } from "@/components/proxy-pool-select";
 import {
   createAccounts,
+  fetchProxyPool,
   finishOAuthLogin,
   startOAuthLogin,
   type Account,
   type AccountImportPayload,
   type OAuthLoginStartResponse,
+  type ProxyPoolItem,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -188,6 +192,8 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
   const [oauthSession, setOauthSession] = useState<OAuthLoginStartResponse | null>(null);
   const [oauthCallbackInput, setOauthCallbackInput] = useState("");
   const [oauthStarting, setOauthStarting] = useState(false);
+  const [proxyPool, setProxyPool] = useState<ProxyPoolItem[]>([]);
+  const [proxyId, setProxyId] = useState("");
 
   const txtInputRef = useRef<HTMLInputElement | null>(null);
   const accountJsonInputRef = useRef<HTMLInputElement | null>(null);
@@ -202,7 +208,13 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
     setOauthSession(null);
     setOauthCallbackInput("");
     setOauthStarting(false);
+    setProxyId("");
   };
+
+  useEffect(() => {
+    if (!open) return;
+    void fetchProxyPool().then((data) => setProxyPool(data.items)).catch(() => toast.error("加载代理列表失败"));
+  }, [open]);
 
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen);
@@ -221,7 +233,7 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
 
     setIsSubmitting(true);
     try {
-      const data = await createAccounts(normalizedTokens, accountPayloads);
+      const data = await createAccounts(normalizedTokens, accountPayloads, proxyId);
       onImported(data.items);
       setOpen(false);
       resetState();
@@ -251,13 +263,10 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
   const startOAuthSession = async () => {
     setOauthStarting(true);
     try {
-      const data = await startOAuthLogin("");
+      const data = await startOAuthLogin("", proxyId);
       setOauthSession(data);
       setOauthCallbackInput("");
-      if (typeof window !== "undefined") {
-        window.open(data.authorize_url, "_blank", "noopener,noreferrer");
-      }
-      toast.success("已打开 OpenAI 授权页面，请在登录后复制 callback URL 回来");
+      toast.success("授权链接已生成，请复制后在浏览器中打开，登录后再粘贴 callback URL");
     } catch (error) {
       const message = error instanceof Error ? error.message : "OAuth 起始失败";
       toast.error(message);
@@ -268,17 +277,13 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
 
   // 起授权：拿 authorize URL，立刻在新窗口打开，方便用户登录
   const handleStartOAuth = async () => {
-    if (oauthSession?.authorize_url && typeof window !== "undefined") {
-      window.open(oauthSession.authorize_url, "_blank", "noopener,noreferrer");
-      return;
-    }
     await startOAuthSession();
   };
 
   // 用粘贴回来的 callback URL 完成换 token + 落盘
   const handleFinishOAuth = async () => {
     if (!oauthSession) {
-      toast.error("请先点击\"打开授权页面\"获取 session");
+      toast.error("请先点击\"生成授权链接\"获取 session");
       return;
     }
     const trimmed = oauthCallbackInput.trim();
@@ -433,17 +438,7 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
 
       return (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <button
-              type="button"
-              onClick={() => setMethod("menu")}
-              className="inline-flex items-center gap-1 text-sm text-stone-500 transition hover:text-stone-800"
-            >
-              <ArrowLeft className="size-4" />
-              返回导入方式
-            </button>
-            <span className="text-xs text-stone-400">当前识别 {tokenCount} 个 Token</span>
-          </div>
+          <div className="text-xs text-stone-400">当前识别 {tokenCount} 个 Token</div>
           <div className="space-y-2">
             <label className="text-sm font-medium text-stone-700">Access Token 列表</label>
             <Textarea
@@ -485,14 +480,6 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
     if (method === "session") {
       return (
         <div className="space-y-4">
-          <button
-            type="button"
-            onClick={() => setMethod("menu")}
-            className="inline-flex items-center gap-1 text-sm text-stone-500 transition hover:text-stone-800"
-          >
-            <ArrowLeft className="size-4" />
-            返回导入方式
-          </button>
           <div className="rounded-2xl border border-stone-200 bg-stone-50 p-4 text-sm leading-6 text-stone-600">
             打开
             {" "}
@@ -529,22 +516,6 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
     if (method === "oauth") {
       return (
         <div className="space-y-4">
-          <button
-            type="button"
-            onClick={() => setMethod("menu")}
-            className="inline-flex items-center gap-1 text-sm text-stone-500 transition hover:text-stone-800"
-          >
-            <ArrowLeft className="size-4" />
-            返回导入方式
-          </button>
-          <div className="rounded-2xl border border-stone-200 bg-stone-50 p-4 text-sm leading-6 text-stone-600 space-y-2">
-            <div className="font-medium text-stone-800">操作步骤</div>
-            <ol className="list-decimal pl-5 space-y-1">
-              <li>点击下方"打开授权页面"，在新标签里登录自己的 ChatGPT 账号。</li>
-              <li>登录完成后浏览器会跳到 <code className="rounded bg-stone-200 px-1">platform.openai.com/auth/callback?code=...</code>。立刻从地址栏复制整段 URL（或开 F12 在 Network 里抓到 callback 那一行，右键 Copy → Copy URL）。</li>
-              <li>把 callback URL 粘到下面输入框，点"完成导入"。</li>
-            </ol>
-          </div>
           <div className="flex flex-wrap gap-2">
             <Button
               type="button"
@@ -553,11 +524,26 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
               disabled={oauthStarting}
             >
               {oauthStarting ? <LoaderCircle className="size-4 animate-spin" /> : <ExternalLink className="size-4" />}
-              打开授权页面
+              生成授权链接
             </Button>
           </div>
           {oauthSession ? (
             <div className="space-y-3">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-stone-700">授权链接</label>
+                <div className="flex gap-2">
+                  <Textarea readOnly value={oauthSession.authorize_url} className="min-h-20 resize-none rounded-xl border-stone-200 font-mono text-xs" />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-10 shrink-0 rounded-xl border-stone-200 bg-white px-3"
+                    onClick={() => void navigator.clipboard.writeText(oauthSession.authorize_url).then(() => toast.success("授权链接已复制"))}
+                    title="复制授权链接"
+                  >
+                    <Copy className="size-4" />
+                  </Button>
+                </div>
+              </div>
               <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
@@ -567,7 +553,7 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
                   disabled={oauthStarting}
                 >
                   {oauthStarting ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                  重新打开授权页面
+                  重新生成授权链接
                 </Button>
               </div>
               <div className="space-y-2">
@@ -581,13 +567,6 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
               </div>
             </div>
           ) : null}
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
-            <div className="font-medium">注意</div>
-            <div>
-              授权码（code）只能使用一次。如果浏览器的 callback 页加载完成、显示了 OpenAI 的错误页，那 code 大概率已经被消耗，
-              请点击"重新打开授权页面"再走一次。整个流程在 10 分钟内完成即可。
-            </div>
-          </div>
         </div>
       );
     }
@@ -595,14 +574,6 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
     if (method === "account-json") {
       return (
         <div className="space-y-4">
-          <button
-            type="button"
-            onClick={() => setMethod("menu")}
-            className="inline-flex items-center gap-1 text-sm text-stone-500 transition hover:text-stone-800"
-          >
-            <ArrowLeft className="size-4" />
-            返回导入方式
-          </button>
           <div className="rounded-2xl border border-dashed border-stone-200 bg-stone-50 p-5">
             <div className="space-y-2">
               <div className="text-sm font-medium text-stone-800">选择本地账号 JSON 文件</div>
@@ -642,14 +613,6 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
     if (method === "codex-auth") {
       return (
         <div className="space-y-4">
-          <button
-            type="button"
-            onClick={() => setMethod("menu")}
-            className="inline-flex items-center gap-1 text-sm text-stone-500 transition hover:text-stone-800"
-          >
-            <ArrowLeft className="size-4" />
-            返回导入方式
-          </button>
           <div className="space-y-2">
             <label className="text-sm font-medium text-stone-700">Codex 认证 JSON</label>
             <Textarea
@@ -719,6 +682,22 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
           </DialogHeader>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+            {method !== "menu" ? (
+              <div className="mb-4 space-y-4">
+                <button
+                  type="button"
+                  onClick={() => setMethod("menu")}
+                  className="inline-flex items-center gap-1 text-sm text-stone-500 transition hover:text-stone-800"
+                >
+                  <ArrowLeft className="size-4" />
+                  返回导入方式
+                </button>
+                <div className="space-y-2 rounded-xl border border-stone-200 bg-stone-50 p-4">
+                  <label className="text-sm font-medium text-stone-700">账号代理</label>
+                  <ProxyPoolSelect items={proxyPool} value={proxyId} onValueChange={setProxyId} disabled={isSubmitting || oauthStarting} />
+                </div>
+              </div>
+            ) : null}
             {renderMethodBody()}
           </div>
 

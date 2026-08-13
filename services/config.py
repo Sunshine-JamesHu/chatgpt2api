@@ -632,6 +632,15 @@ class ConfigStore:
     def get_proxy_settings(self) -> str:
         return str(self.data.get("proxy") or "").strip()
 
+    def get_proxy_pool(self) -> list[dict[str, object]]:
+        items = self.data.get("proxy_pool")
+        return [dict(item) for item in items] if isinstance(items, list) else []
+
+    def save_proxy_pool(self, items: list[dict[str, object]]) -> list[dict[str, object]]:
+        self.data["proxy_pool"] = [dict(item) for item in items]
+        self._save()
+        return self.get_proxy_pool()
+
     def get_proxy_runtime_settings(self) -> dict[str, object]:
         return _normalize_proxy_runtime_settings(self.data.get("proxy_runtime"))
 

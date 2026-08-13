@@ -35,6 +35,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { ProxyPoolSelect } from "@/components/proxy-pool-select";
 import {
   Select,
   SelectContent,
@@ -50,13 +51,14 @@ import {
   fetchReLoginProgress,
   reLoginAccounts,
   refreshAccounts,
-  testProxy,
+  fetchProxyPool,
   updateAccount,
   type Account,
   type AccountRefreshResponse,
   type AccountStatus,
   type Model,
   type RefreshProgressResponse,
+  type ProxyPoolItem,
 } from "@/lib/api";
 import { useAuthGuard } from "@/lib/use-auth-guard";
 import { cn } from "@/lib/utils";
@@ -177,8 +179,8 @@ function AccountsPageContent() {
   const [pageSize, setPageSize] = useState("10");
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
   const [editStatus, setEditStatus] = useState<AccountStatus>("正常");
-  const [editProxy, setEditProxy] = useState("");
-  const [isTestingProxy, setIsTestingProxy] = useState(false);
+  const [editProxyId, setEditProxyId] = useState("");
+  const [proxyPool, setProxyPool] = useState<ProxyPoolItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingModels, setIsLoadingModels] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -652,27 +654,10 @@ function AccountsPageContent() {
   const openEditDialog = (account: Account) => {
     setEditingAccount(account);
     setEditStatus(account.status);
-    setEditProxy(account.proxy ?? "");
+    setEditProxyId(account.proxy_id ?? "");
+    void fetchProxyPool().then((data) => setProxyPool(data.items)).catch(() => toast.error("加载代理列表失败"));
   };
 
-  const handleTestAccountProxy = async () => {
-    const candidate = editProxy.trim();
-    if (!candidate) {
-      toast.error("请先填写代理地址");
-      return;
-    }
-    setIsTestingProxy(true);
-    try {
-      const data = await testProxy(candidate);
-      data.result.ok
-        ? toast.success(`代理可用（${data.result.latency_ms} ms，HTTP ${data.result.status}）`)
-        : toast.error(`代理不可用：${data.result.error ?? "未知错误"}`);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "测试代理失败");
-    } finally {
-      setIsTestingProxy(false);
-    }
-  };
 
   const handleUpdateAccount = async () => {
     if (!editingAccount) {
@@ -683,7 +668,7 @@ function AccountsPageContent() {
     try {
       const data = await updateAccount(editingAccount.access_token, {
         status: editStatus,
-        proxy: editProxy.trim(),
+        proxy_id: editProxyId,
       });
       setAccounts(data.items);
       setSelectedIds((prev) => prev.filter((id) => data.items.some((item) => item.access_token === id)));
@@ -806,19 +791,19 @@ function AccountsPageContent() {
             <div className="space-y-2">
               <label className="text-sm font-medium text-stone-700">账号代理</label>
               <div className="flex flex-col gap-2 sm:flex-row">
+                <ProxyPoolSelect items={proxyPool} value={editProxyId} onValueChange={setEditProxyId} disabled={isUpdating} />
                 <Input
-                  value={editProxy}
-                  onChange={(event) => setEditProxy(event.target.value)}
+                  value={editProxyId}
+                  onChange={(event) => setEditProxyId(event.target.value)}
                   placeholder="留空走全局代理，例如 http://127.0.0.1:7890"
-                  className="h-11 rounded-xl border-stone-200 bg-white"
+                  className="hidden h-11 rounded-xl border-stone-200 bg-white"
                 />
                 <Button
                   variant="outline"
-                  className="h-11 rounded-xl border-stone-200 bg-white px-4 text-stone-700 sm:w-24"
-                  onClick={() => void handleTestAccountProxy()}
-                  disabled={isTestingProxy}
+                  className="hidden h-11 rounded-xl border-stone-200 bg-white px-4 text-stone-700 sm:w-24"
+                  disabled
                 >
-                  {isTestingProxy ? <LoaderCircle className="size-4 animate-spin" /> : <Link2 className="size-4" />}
+                  <Link2 className="size-4" />
                   测试
                 </Button>
               </div>

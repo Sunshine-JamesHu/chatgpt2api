@@ -1,0 +1,33 @@
+npm warn Unknown project config "enable-pre-post-scripts". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+▲ Next.js 16.2.3 (webpack)
+- Local:         http://127.0.0.1:3100
+- Network:       http://127.0.0.1:3100
+✓ Ready in 714ms
+
+ GET /login/ 200 in 3.5s (next.js: 3.2s, application-code: 307ms)
+ GET /accounts/ 200 in 1348ms (next.js: 1288ms, application-code: 60ms)
+ GET /accounts/ 200 in 29ms (next.js: 6ms, application-code: 24ms)
+ GET /proxies/ 200 in 1050ms (next.js: 1009ms, application-code: 41ms)
+ GET /accounts/ 200 in 43ms (next.js: 19ms, application-code: 24ms)
+ GET /accounts/ 200 in 139ms (next.js: 97ms, application-code: 43ms)
+ GET /accounts/ 200 in 216ms (next.js: 4ms, application-code: 212ms)
+ GET /accounts/ 200 in 47ms (next.js: 3ms, application-code: 44ms)
+ GET /proxies/ 200 in 35ms (next.js: 13ms, application-code: 22ms)
+ GET /proxies/ 200 in 170ms (next.js: 86ms, application-code: 85ms)
+ GET /accounts/ 200 in 45ms (next.js: 15ms, application-code: 31ms)
+ GET /proxies/ 200 in 21ms (next.js: 2ms, application-code: 19ms)
+ GET /accounts/ 200 in 22ms (next.js: 2ms, application-code: 19ms)
+ GET /proxies/ 200 in 23ms (next.js: 1878µs, application-code: 21ms)
+ GET /proxies/ 200 in 213ms (next.js: 1865µs, application-code: 211ms)
+ GET /accounts/ 200 in 65ms (next.js: 3ms, application-code: 63ms)
+ GET /accounts/ 200 in 21ms (next.js: 2ms, application-code: 19ms)
+ GET /accounts/ 200 in 154ms (next.js: 90ms, application-code: 64ms)
+ GET /accounts/ 200 in 25ms (next.js: 2ms, application-code: 22ms)
+ GET /accounts/ 200 in 108ms (next.js: 47ms, application-code: 62ms)
+ GET /accounts/ 200 in 24ms (next.js: 2ms, application-code: 21ms)
+ GET /accounts/ 200 in 94ms (next.js: 44ms, application-code: 50ms)
+ GET /accounts/ 200 in 23ms (next.js: 2ms, application-code: 21ms)
+ GET /accounts/ 200 in 99ms (next.js: 46ms, application-code: 54ms)
+ GET /accounts/ 200 in 27ms (next.js: 2ms, application-code: 24ms)
+ GET /accounts/ 200 in 110ms (next.js: 45ms, application-code: 65ms)
+ GET /accounts/ 200 in 30ms (next.js: 2ms, application-code: 28ms)

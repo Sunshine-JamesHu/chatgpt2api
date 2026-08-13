@@ -115,5 +115,21 @@
     }
   },
   "image_remove_conversation_after_result": true,
-  "image_upstream_model_slug": ""
+  "image_upstream_model_slug": "",
+  "proxy_pool": [
+    {
+      "id": "da1203a19a74404fb3a0df1b1c181f7f",
+      "name": "新加坡",
+      "url": "socks5h://MJ_SG.001:dd37b713213dfb8fc11e6ed6a3aa8ccac8ce9a754946a7c939225350d166e87d@192.168.31.88:2260",
+      "created_at": "2026-08-13T13:41:47.979891+00:00",
+      "updated_at": "2026-08-13T13:41:47.979891+00:00"
+    },
+    {
+      "id": "496afea486834bb2a696e8ee2e477365",
+      "name": "洛杉矶1",
+      "url": "socks5h://192.168.31.88:7898",
+      "created_at": "2026-08-13T13:42:13.229937+00:00",
+      "updated_at": "2026-08-13T13:42:13.229937+00:00"
+    }
+  ]
 }

@@ -66,7 +66,7 @@ class OAuthLoginService:
             for sid, _ in ordered[: len(self._sessions) - self._MAX_SESSIONS]:
                 self._sessions.pop(sid, None)
 
-    def start(self, email_hint: str = "") -> dict[str, str]:
+    def start(self, email_hint: str = "", proxy_id: str | None = None) -> dict[str, str]:
         """登记一个新的 PKCE 会话，返回 session_id 与可让用户打开的 authorize_url。
 
         state 形如 "<session_id>.<nonce>"，让 callback URL 自带 session_id，
@@ -100,6 +100,14 @@ class OAuthLoginService:
             params["login_hint"] = email_hint
 
         authorize_url = f"{auth_base}/api/accounts/authorize?{urlencode(params)}"
+        proxy_url = ""
+        proxy_id = str(proxy_id or "").strip()
+        if proxy_id:
+            from services.proxy_pool_service import ProxyPoolError, proxy_pool_service
+            try:
+                proxy_url = proxy_pool_service.get_url(proxy_id)
+            except ProxyPoolError as exc:
+                raise OAuthLoginError(str(exc)) from exc
 
         with self._lock:
             self._purge_expired_locked()
@@ -108,6 +116,8 @@ class OAuthLoginService:
                 "state": state,
                 "created_at": time.time(),
                 "redirect_uri": platform_oauth_redirect_uri,
+                "proxy_id": proxy_id,
+                "proxy_url": proxy_url,
             }
 
         return {
@@ -184,16 +194,23 @@ class OAuthLoginService:
             code,
             session["code_verifier"],
             session.get("redirect_uri") or platform_oauth_redirect_uri,
+            session.get("proxy_url") or "",
         )
         # 仅在成功兑换之后才消耗 session
         with self._lock:
             self._sessions.pop(picked_sid, None)
-        return tokens
+        return {**tokens, "proxy_id": str(session.get("proxy_id") or "")}
 
     @staticmethod
-    def _exchange_code(code: str, code_verifier: str, redirect_uri: str) -> dict[str, str]:
+    def _exchange_code(code: str, code_verifier: str, redirect_uri: str, proxy_url: str) -> dict[str, str]:
         """调用 /api/accounts/oauth/token 用 code+verifier 换 token 三件套。"""
-        kwargs = proxy_settings.build_session_kwargs(impersonate="chrome", verify=False)
+        # A selected import proxy is a strict egress requirement. Do not pass it
+        # through runtime selection, where a global single-proxy profile may win.
+        kwargs = (
+            {"proxy": proxy_url, "impersonate": "chrome", "verify": False}
+            if proxy_url
+            else proxy_settings.build_session_kwargs(impersonate="chrome", verify=False)
+        )
         session = requests.Session(**kwargs)
         try:
             response = session.post(

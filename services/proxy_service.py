@@ -16,6 +16,10 @@ from curl_cffi.requests import Session
 from services.config import config
 
 
+class ProxyResolutionError(RuntimeError):
+    pass
+
+
 FlareSolverrRequestMethod = Callable[[str, bytes, dict[str, str], float], bytes]
 
 
@@ -181,6 +185,13 @@ class ProxySettingsStore:
         egress_mode = str(runtime.get("egress_mode") or "direct").strip().lower()
 
         account_proxy = _clean((account or {}).get("proxy") if isinstance(account, dict) else "")
+        account_proxy_id = _clean((account or {}).get("proxy_id") if isinstance(account, dict) else "")
+        if account_proxy_id:
+            from services.proxy_pool_service import ProxyPoolError, proxy_pool_service
+            try:
+                account_proxy = proxy_pool_service.get_url(account_proxy_id)
+            except ProxyPoolError as exc:
+                raise ProxyResolutionError(f"账号绑定的代理不可用: {exc}") from exc
         explicit_proxy = _clean(proxy)
         legacy_proxy = _clean(self._config.get_proxy_settings())
 

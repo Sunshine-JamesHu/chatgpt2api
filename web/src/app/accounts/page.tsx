@@ -666,10 +666,12 @@ function AccountsPageContent() {
 
     setIsUpdating(true);
     try {
-      const data = await updateAccount(editingAccount.access_token, {
-        status: editStatus,
-        proxy_id: editProxyId,
-      });
+      const updates: { status: AccountStatus; proxy_id?: string | null } = { status: editStatus };
+      // A legacy proxy stays untouched until the operator explicitly selects a pool proxy.
+      if (editProxyId !== (editingAccount.proxy_id ?? "")) {
+        updates.proxy_id = editProxyId;
+      }
+      const data = await updateAccount(editingAccount.access_token, updates);
       setAccounts(data.items);
       setSelectedIds((prev) => prev.filter((id) => data.items.some((item) => item.access_token === id)));
       setEditingAccount(null);
@@ -790,23 +792,12 @@ function AccountsPageContent() {
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium text-stone-700">账号代理</label>
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <ProxyPoolSelect items={proxyPool} value={editProxyId} onValueChange={setEditProxyId} disabled={isUpdating} />
-                <Input
-                  value={editProxyId}
-                  onChange={(event) => setEditProxyId(event.target.value)}
-                  placeholder="留空走全局代理，例如 http://127.0.0.1:7890"
-                  className="hidden h-11 rounded-xl border-stone-200 bg-white"
-                />
-                <Button
-                  variant="outline"
-                  className="hidden h-11 rounded-xl border-stone-200 bg-white px-4 text-stone-700 sm:w-24"
-                  disabled
-                >
-                  <Link2 className="size-4" />
-                  测试
-                </Button>
-              </div>
+              {editingAccount?.proxy && !editingAccount.proxy_id ? (
+                <div className="rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 font-mono text-xs leading-5 text-stone-600 break-all">
+                  {editingAccount.proxy}
+                </div>
+              ) : null}
+              <ProxyPoolSelect items={proxyPool} value={editProxyId} onValueChange={setEditProxyId} disabled={isUpdating} />
             </div>
           </div>
           <DialogFooter className="pt-2">
